@@ -79,12 +79,24 @@ def preview_network(config: dict) -> None:
         except Exception:
             is_proj = False
         if not is_proj:
-            print("  Projecting graph to meters …")
+            print("  Projecting graph to meters ...")
             loader.G = ox.project_graph(loader.G)
     else:
         print(f"Graph file '{graph_file}' not found — downloading from OSM: '{place_name}'")
-        print("  This may take a minute on the first run …")
-        loader.load_graph()
+        print("  This may take a minute on the first run ...")
+        try:
+            loader.load_graph()
+        except Exception as exc:
+            raise RuntimeError(
+                f"\n\nCould not download the road network for '{place_name}'.\n"
+                f"Possible causes:\n"
+                f"  - The place name is misspelled or not recognised by OpenStreetMap.\n"
+                f"  - No internet connection in this Colab session.\n"
+                f"  - OSM servers are temporarily unavailable.\n\n"
+                f"Tip: Try a well-known city name like 'Tel Aviv, Israel' or upload a "
+                f".gpickle file and set 'graph_file' to its path.\n\n"
+                f"Original error: {exc}"
+            ) from exc
 
     G = loader.G
     try:
@@ -157,7 +169,18 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
         if not is_proj:
             loader.G = ox.project_graph(loader.G)
     else:
-        loader.load_graph()
+        try:
+            loader.load_graph()
+        except Exception as exc:
+            raise RuntimeError(
+                f"\n\nCould not download the road network for '{place_name}'.\n"
+                f"Possible causes:\n"
+                f"  - The place name is misspelled or not recognised by OpenStreetMap.\n"
+                f"  - No internet connection in this Colab session.\n\n"
+                f"Tip: Try a well-known city name like 'Tel Aviv, Israel' or upload a "
+                f".gpickle file and set 'graph_file' to its path.\n\n"
+                f"Original error: {exc}"
+            ) from exc
 
     loader.enrich_graph()
     loader.seed = base_seed
@@ -338,11 +361,79 @@ def plot_results(excel_file: str, config: dict | None = None) -> None:
 
     Wraps :func:`~plots.plots.plot_sim_diagnostics`.
     Pass *config* to forward ``vehicle_T`` (used to set the time-axis horizon).
+    Individual plots that fail are skipped with a printed warning.
     """
     from ExpandedTimeSimulation.simulation_zefat.plots.plots import plot_sim_diagnostics
 
     vehicle_T = (config or {}).get("vehicle_T", None)
-    plot_sim_diagnostics(excel_file, horizon_T=vehicle_T, fs=13)
+    try:
+        plot_sim_diagnostics(excel_file, horizon_T=vehicle_T, fs=13)
+    except (ValueError, KeyError) as exc:
+        print(f"Warning: some plots could not be generated: {exc}")
+
+
+def preview_network_map(config: dict):
+    """Return an interactive folium map of the road network.
+
+    Displays the physical road edges on an OpenStreetMap basemap.
+    Call ``display(preview_network_map(config))`` in Colab to render it.
+    """
+    import osmnx as ox
+    try:
+        import folium
+    except ImportError:
+        print("folium is not installed. Run:  !pip install -q folium")
+        return None
+
+    from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
+
+    graph_file = config.get("graph_file", "har_nof.gpickle")
+    place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
+    slot_seconds = config.get("slot_seconds", 60)
+
+    loader = RealData(place_name, time_slot_duration=slot_seconds, od_count=1)
+
+    if os.path.exists(graph_file):
+        loader.load_graph_from_file(graph_file)
+    else:
+        try:
+            loader.load_graph()
+        except Exception as exc:
+            print(f"Could not load graph for map: {exc}")
+            return None
+
+    G = loader.G
+
+    # Get node positions in lat/lon (un-projected)
+    try:
+        G_latlon = ox.projection.project_graph(G, to_crs="EPSG:4326")
+    except Exception:
+        G_latlon = G  # already in lat/lon if projection fails
+
+    nodes, edges = ox.graph_to_gdfs(G_latlon)
+    center_lat = float(nodes.geometry.y.mean())
+    center_lon = float(nodes.geometry.x.mean())
+
+    fmap = folium.Map(location=[center_lat, center_lon], zoom_start=15,
+                      tiles="OpenStreetMap")
+
+    # Draw road edges
+    for _, row in edges.iterrows():
+        coords = [(lat, lon) for lon, lat in row.geometry.coords]
+        folium.PolyLine(
+            coords,
+            color="#3388ff",
+            weight=2.5,
+            opacity=0.7,
+        ).add_to(fmap)
+
+    folium.Marker(
+        [center_lat, center_lon],
+        popup=f"Network centre\n{place_name}",
+        icon=folium.Icon(color="red", icon="info-sign"),
+    ).add_to(fmap)
+
+    return fmap
 
 
 # ---------------------------------------------------------------------------

@@ -1787,73 +1787,72 @@ def plot_sim_diagnostics(
     if missing:
         raise ValueError(f"{SHEET_VEHICLES_TABLE} missing required columns: {missing}")
 
+    def _try_plot(fn, *args, label="", **kwargs):
+        """Run a plot function and print a friendly warning instead of crashing."""
+        try:
+            fn(*args, **kwargs)
+        except (ValueError, KeyError, TypeError) as exc:
+            name = label or fn.__name__
+            print(f"[plot skipped] {name}: {exc}")
+
     # Request spread — shown first for immediate visibility
     if isinstance(ts_tbl, pd.DataFrame) and not ts_tbl.empty:
-        plot_requests_over_time(ts_tbl, fs=fs)
-        plot_requests_heatmap(ts_tbl, top_n=20, fs=fs)
+        _try_plot(plot_requests_over_time, ts_tbl, fs=fs)
+        _try_plot(plot_requests_heatmap, ts_tbl, top_n=20, fs=fs)
 
-    plot_transport_adapted_update_growth()
+    _try_plot(plot_transport_adapted_update_growth)
 
     # SW sweep (computed from vehicles_table)
-    df_sw = compute_sw_time_only_from_df(
-        veh_tbl,
-        include_arrival_delay=True,
-        include_entry_delay=False,
-        served_only=True,
-    )
-    plot_sw_sweep(df_sw, baseline="Zero", compare="Transport-Adapted Pricing")
+    try:
+        df_sw = compute_sw_time_only_from_df(
+            veh_tbl,
+            include_arrival_delay=True,
+            include_entry_delay=False,
+            served_only=True,
+        )
+        _try_plot(plot_sw_sweep, df_sw, baseline="Zero", compare="Transport-Adapted Pricing")
+    except Exception as exc:
+        print(f"[plot skipped] SW sweep: {exc}")
 
-    # % accepted over time (fee bands) — expects the relevant fee column to exist in veh_tbl
-    plot_percent_accepted_over_time_by_fee_bands_5000(
-        veh_tbl,
-        bands=((1, 2), (4, 5)),
-        by="request",
-        fee_col=COL_LATENESS_FEE,
-        mode="arrival",
-        fs=fs,
+    # % accepted over time (fee bands)
+    _try_plot(
+        plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
+        bands=((1, 2), (4, 5)), by="request",
+        fee_col=COL_LATENESS_FEE, mode="arrival", fs=fs,
     )
-
-    plot_percent_accepted_over_time_by_fee_bands_5000(
-        veh_tbl,
-        bands=((1, 2), (4, 5)),
-        panels="bands",
-        fee_col=COL_LATENESS_FEE,
-        mode="arrival",
-        fs=fs,
+    _try_plot(
+        plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
+        bands=((1, 2), (4, 5)), panels="bands",
+        fee_col=COL_LATENESS_FEE, mode="arrival", fs=fs,
     )
-
-    plot_percent_accepted_over_time_by_fee_bands_5000(
-        veh_tbl,
-        panels="all",
-        fee_col=COL_LATENESS_FEE,
-        mode="arrival",
-        fs=max(8, fs - 3),
+    _try_plot(
+        plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
+        panels="all", fee_col=COL_LATENESS_FEE,
+        mode="arrival", fs=max(8, fs - 3),
     )
 
     # price vs travel time
-    plot_price_vs_travel_time_by_N(
-        veh_tbl,
-        Ns=(1000, 5000, 10000),
-        fs=fs,
-        price_col=COL_PAID_FEE,
-        travel_time_col=COL_TRAVEL_TIME,
+    _try_plot(
+        plot_price_vs_travel_time_by_N, veh_tbl,
+        Ns=(1000, 5000, 10000), fs=fs,
+        price_col=COL_PAID_FEE, travel_time_col=COL_TRAVEL_TIME,
     )
 
     # travel time vs alpha
-    plot_travel_time_vs_alpha_by_N(veh_tbl, bins=12, Ns=(5000, 10000), fs=fs + 2)
+    _try_plot(plot_travel_time_vs_alpha_by_N, veh_tbl, bins=12, Ns=(5000, 10000), fs=fs + 2)
 
     # delay vs fee
-    plot_delay_or_arrival_vs_fee_by_N(veh_tbl, pair="arrival", Ns=(5000, 10000), fs=fs)
+    _try_plot(plot_delay_or_arrival_vs_fee_by_N, veh_tbl, pair="arrival", Ns=(5000, 10000), fs=fs)
 
-    # vehicles on road (mean over runs) — uses horizon_T if provided
-    plot_mean_vehicles_on_road_dynamic_5000(veh_tbl, T=horizon_T)
+    # vehicles on road (mean over runs)
+    _try_plot(plot_mean_vehicles_on_road_dynamic_5000, veh_tbl, T=horizon_T)
 
     # price-by-time-slot (optional)
     if isinstance(ts_tbl, pd.DataFrame) and (not ts_tbl.empty):
-        plot_price_by_time_slot_per_strategy_meanmax_5000(ts_tbl)
+        _try_plot(plot_price_by_time_slot_per_strategy_meanmax_5000, ts_tbl)
 
     # accepts/rejects
-    plot_accepts_rejects_over_time(veh_tbl, by="request")
-    plot_acceptance_rate_over_time(veh_tbl, by="request")
-    plot_cumulative_accepts_rejects(veh_tbl, by="request")
+    _try_plot(plot_accepts_rejects_over_time, veh_tbl, by="request")
+    _try_plot(plot_acceptance_rate_over_time, veh_tbl, by="request")
+    _try_plot(plot_cumulative_accepts_rejects, veh_tbl, by="request")
 

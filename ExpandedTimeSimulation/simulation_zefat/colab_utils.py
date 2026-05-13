@@ -40,11 +40,24 @@ def decode_reject_reason(code: Any) -> str:
 def load_config_from_widgets(w: dict) -> dict:
     """Extract .value from each ipywidget and return a plain config dict.
 
+    Normalizes display values to internal format (e.g., "Only Entry" -> "entry").
+
     Usage::
 
         config = load_config_from_widgets(widgets)
     """
-    return {k: widget.value for k, widget in w.items()}
+    config = {k: widget.value for k, widget in w.items()}
+    
+    # Normalize time_mode from display format to internal format
+    if "time_mode" in config:
+        mode_map = {
+            "Only Entry": "entry",
+            "Only Arrival": "arrival",
+            "Both": "both",
+        }
+        config["time_mode"] = mode_map.get(config["time_mode"], "both")
+    
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +156,7 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
 
     from ExpandedTimeSimulation.simulation_zefat.experiments.vehicle_generation import (
         PeakSchedule,
-        assign_peak_desired_entry,
+        assign_peak_desired_time_by_mode,
         mixed_alpha_sampler,
     )
     from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
@@ -156,6 +169,8 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
     peak_sigma = config.get("peak_sigma", 5.0)
     vehicle_T = config.get("vehicle_T", 100)
     base_seed = config.get("base_seed", 42)
+    time_mode = config.get("time_mode", "both")
+    arrival_percentage = config.get("arrival_percentage", 0.5)
 
     loader = RealData(place_name, time_slot_duration=slot_seconds, od_count=od_count)
 
@@ -190,17 +205,18 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
         [(0.4, (0.0, 0.3)), (0.4, (0.3, 0.7)), (0.2, (0.7, 1.0))]
     )
     vehicles = loader.generate_vehicles(alpha=alpha_mix)
-    assign_peak_desired_entry(
+    assign_peak_desired_time_by_mode(
         vehicles,
         schedule=PeakSchedule(
             peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
         ),
-        write_arrival=True,
+        mode=time_mode,
+        arrival_percentage=arrival_percentage,
     )
 
     cols = [
         "source", "destination", "alpha", "reserve",
-        "desired_entry", "entry_fee", "lateness_fee",
+        "desired_entry", "desired_arrival", "entry_fee", "lateness_fee",
     ]
     preview_df = (
         pd.DataFrame([{k: v[k] for k in cols if k in v} for v in vehicles[:10]])
@@ -210,23 +226,58 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
 
 
 def plot_demand_distribution(vehicles: list[dict]) -> None:
-    """Two-panel histogram: desired entry time distribution and alpha distribution."""
-    desired_entries = [v.get("desired_entry", 0) for v in vehicles]
+    """Histogram(s) for desired times and alpha distribution.
+    
+    Shows desired_entry, desired_arrival, or both depending on which fields are set.
+    """
+    desired_entries = [v.get("desired_entry") for v in vehicles]
+    desired_arrivals = [v.get("desired_arrival") for v in vehicles]
     alphas = [v.get("alpha", 0.0) for v in vehicles]
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    axes[0].hist(desired_entries, bins=30, color="steelblue", edgecolor="white", linewidth=0.4)
-    axes[0].set_xlabel("Desired Entry Time Slot", fontsize=12)
-    axes[0].set_ylabel("Number of Vehicles", fontsize=12)
-    axes[0].set_title("Desired Entry Time Distribution", fontsize=13)
-    axes[0].grid(axis="y", alpha=0.3)
-
-    axes[1].hist(alphas, bins=30, color="darkorange", edgecolor="white", linewidth=0.4)
-    axes[1].set_xlabel("Alpha  (price–time weight)", fontsize=12)
-    axes[1].set_ylabel("Number of Vehicles", fontsize=12)
-    axes[1].set_title("Alpha Distribution", fontsize=13)
-    axes[1].grid(axis="y", alpha=0.3)
+    
+    # Filter to only non-None values
+    has_entries = any(e is not None for e in desired_entries)
+    has_arrivals = any(a is not None for a in desired_arrivals)
+    
+    desired_entries_clean = [e for e in desired_entries if e is not None]
+    desired_arrivals_clean = [a for a in desired_arrivals if a is not None]
+    
+    # Determine layout based on which fields exist
+    if has_entries and has_arrivals:
+        n_cols = 3
+        n_time_plots = 2
+    else:
+        n_cols = 2
+        n_time_plots = 1
+    
+    fig, axes = plt.subplots(1, n_cols, figsize=(5 + 4 * n_cols, 4))
+    if n_cols == 1:
+        axes = [axes]
+    
+    plot_idx = 0
+    
+    if has_entries:
+        axes[plot_idx].hist(desired_entries_clean, bins=30, color="steelblue", 
+                          edgecolor="white", linewidth=0.4)
+        axes[plot_idx].set_xlabel("Desired Entry Time Slot", fontsize=12)
+        axes[plot_idx].set_ylabel("Number of Vehicles", fontsize=12)
+        axes[plot_idx].set_title("Desired Entry Time Distribution", fontsize=13)
+        axes[plot_idx].grid(axis="y", alpha=0.3)
+        plot_idx += 1
+    
+    if has_arrivals:
+        axes[plot_idx].hist(desired_arrivals_clean, bins=30, color="seagreen", 
+                          edgecolor="white", linewidth=0.4)
+        axes[plot_idx].set_xlabel("Desired Arrival Time Slot", fontsize=12)
+        axes[plot_idx].set_ylabel("Number of Vehicles", fontsize=12)
+        axes[plot_idx].set_title("Desired Arrival Time Distribution", fontsize=13)
+        axes[plot_idx].grid(axis="y", alpha=0.3)
+        plot_idx += 1
+    
+    axes[plot_idx].hist(alphas, bins=30, color="darkorange", edgecolor="white", linewidth=0.4)
+    axes[plot_idx].set_xlabel("Alpha  (price–time weight)", fontsize=12)
+    axes[plot_idx].set_ylabel("Number of Vehicles", fontsize=12)
+    axes[plot_idx].set_title("Alpha Distribution", fontsize=13)
+    axes[plot_idx].grid(axis="y", alpha=0.3)
 
     plt.suptitle(
         f"Vehicle Fleet Preview  (n={len(vehicles):,})", fontsize=14, y=1.02
@@ -436,8 +487,25 @@ def preview_network_map(config: dict):
     return fmap
 
 
-# ---------------------------------------------------------------------------
-# Export
+def print_vehicle_summary(vehicles: list[dict]) -> None:
+    """Print a summary of vehicle allocation outcomes.
+
+    Useful for debugging or inspection in Colab.
+    """
+    print("\nVehicle Allocation Summary (one line per vehicle):")
+    for i, v in enumerate(vehicles, 1):
+        served = "SERVED" if v.get("path_found") else "REJECTED"
+        src = v.get("source", "?")
+        dst = v.get("destination", "?")
+        alpha = v.get("alpha", 0.0)
+        reserve = v.get("reserve", 0.0)
+        cost = v.get("paid_fee", 0.0)
+        entry = v.get("entry_time")
+        exit_t = v.get("exit_time")
+        print(f"  {i:3d}: {src}→{dst} α={alpha:.2f} res={reserve:.2f} cost={cost:.2f} "
+              f"entry={entry} exit={exit_t} {served}")
+
+
 # ---------------------------------------------------------------------------
 
 

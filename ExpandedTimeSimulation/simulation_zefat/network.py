@@ -17,8 +17,7 @@ from ExpandedTimeSimulation.simulation_zefat.strategies import ZeroPricingStrate
 from .utils import edge_key
 from .edge_data import EdgeData
 import os, json, pickle, hashlib, ast
-import pandas as pd
-import networkx as nx
+
 
 SCHEMA_VERSION = 6  # bump if EdgeData / cache layout changes
 
@@ -384,8 +383,8 @@ class TimeExpandedRoadNetwork:
         return total_cost
 
     def print_vehicle_info(self, vehicles):
-        print("\nVehicle Allocation Summary (one line per vehicle):")
-        print("# | Src->Dst | mode | alpha | entry->arrival | real_cost | reserve | status | path")
+        # print("\nVehicle Allocation Summary (one line per vehicle):")
+        # print("# | Src->Dst | mode | alpha | entry->arrival | real_cost | reserve | status | path")
         for i, v in enumerate(vehicles, 1):
             if v.get("allocated_path"):
                 filtered = [
@@ -400,9 +399,9 @@ class TimeExpandedRoadNetwork:
             rc_str = "∞" if rc == float("inf") else f"{rc:.2f}" if rc is not None else "N/A"
             status = "ACCEPT" if rc not in (None, float("inf")) and rc <= v.get("reserve", 0) else "REJECT"
 
-            print(f"{i:2d} | {v['source']}->{v['destination']} | {v['mode']} | "
-                  f"{v['alpha']:.2f} | {v['entry_time']}->{v['exit_time']} | "
-                  f"{v['real_cost']:.5f} | {v['reserve']:.2f} | {status:^7} | {path_str}")
+            # print(f"{i:2d} | {v['source']}->{v['destination']} | {v['mode']} | "
+            #       f"{v['alpha']:.2f} | {v['entry_time']}->{v['exit_time']} | "
+            #       f"{v['real_cost']:.5f} | {v['reserve']:.2f} | {status:^7} | {path_str}")
 
     def print_edge_price_summary(self):
         print("\nFinal Edge Prices (total, per unit, and capacity):")

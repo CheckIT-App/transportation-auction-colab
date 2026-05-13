@@ -119,6 +119,47 @@ def assign_peak_desired_entry(
             v[COL_DESIRED_ARRIVAL] = t
 
 
+def assign_peak_desired_time_by_mode(
+    vehicles: list[dict],
+    *,
+    schedule: PeakSchedule = PeakSchedule(),
+    mode: str = "both",
+    arrival_percentage: float = 0.5,
+) -> None:
+    """
+    Assign desired_entry and/or desired_arrival based on mode.
+
+    Args:
+        vehicles: list of vehicle dicts to mutate
+        schedule: PeakSchedule for Gaussian sampling
+        mode: "entry" (only desired_entry), "arrival" (only desired_arrival), or "both"
+        arrival_percentage: when mode="both", fraction of vehicles to assign arrival
+                           (rest get entry). E.g., 0.5 = 50/50 split.
+
+    Mutates vehicles in-place:
+      - if mode="entry": only set COL_DESIRED_ENTRY
+      - if mode="arrival": only set COL_DESIRED_ARRIVAL
+      - if mode="both": randomly assign one or the other per vehicle using arrival_percentage
+    """
+    for v in vehicles:
+        t = sample_peak_time(schedule.peak_slot, schedule.sigma, schedule.horizon_T)
+        
+        if mode == "entry":
+            v[COL_DESIRED_ENTRY] = t
+            # Don't touch desired_arrival
+        elif mode == "arrival":
+            v[COL_DESIRED_ARRIVAL] = t
+            # Don't touch desired_entry
+        elif mode == "both":
+            # Randomly choose: arrival_percentage of vehicles get arrival, rest get entry
+            if random.random() < arrival_percentage:
+                v[COL_DESIRED_ARRIVAL] = t
+            else:
+                v[COL_DESIRED_ENTRY] = t
+        else:
+            raise ValueError(f"Unknown mode: {mode}. Must be 'entry', 'arrival', or 'both'.")
+
+
 def ensure_alpha_field(
     vehicles: list[dict],
     *,

@@ -212,7 +212,7 @@ class AuctionSimulator:
             else:
                 raise ValueError(
                     "Unknown path_solver '{}'. Use one of: dijkstra, bidirectional_dijkstra, "
-                    "astar_euclidean, astar_fflb, astar_fflb_delay, reverse_astar_ff".format(self.path_solver)
+                    "astar_euclidean, astar_fallback, astar_fflb_delay, reverse_astar_ff".format(self.path_solver)
                 )
             return path
         except nx.NetworkXNoPath:
@@ -245,7 +245,7 @@ class AuctionSimulator:
             self._physical_fwd, src_phys, weight="weight"
         )
 
-    def astar_fflb_heuristic(self, u, src_phys, dst_phys, alpha):
+    def astar_fallback_heuristic(self, u, src_phys, dst_phys, alpha):
         """
         A* heuristic from free-flow lower bound (FFLB):
         h((node,t)) = alpha * min_travel_time_slots(node -> dst) .

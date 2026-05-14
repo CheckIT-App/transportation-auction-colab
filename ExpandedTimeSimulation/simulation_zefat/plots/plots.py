@@ -413,204 +413,6 @@ def plot_delay_or_arrival_vs_fee_by_N(
     plt.show()
 
 
-def plot_mean_vehicles_on_road_dynamic_5000(
-    df_vehicles: pd.DataFrame,
-    T: int | None = None,
-    run_col: str | None = None,
-    show_band: bool = True,
-    fs: int = 20,
-    N_value: int = 5000,
-    strategy_value: str = "Transport-Adapted",
-):
-    """
-    For N=5000 & strategy='Transport-Adapted':
-      • compute _vehicles_on_road_over_time per run
-      • align/pad to a common T
-      • plot the mean curve (and optional 95% CI)
-
-    Returns (t, mean_curve).
-    """
-    df = df_vehicles.copy()
-
-    _require_cols(df, [COL_N, COL_STRATEGY, COL_SERVED, COL_ENTRY_TIME, COL_EXIT_TIME], "plot_mean_vehicles_on_road_dynamic_5000")
-
-    subset = df[(df[COL_N] == N_value) & (df[COL_STRATEGY].astype(str) == str(strategy_value))].copy()
-    if subset.empty:
-        raise ValueError(f"No rows found for N={N_value} and strategy='{strategy_value}'.")
-
-    # run column (fixed default + allow override)
-    if run_col is None:
-        run_col = COL_RUN
-    if run_col not in subset.columns:
-        raise ValueError(f"Run column '{run_col}' not found. (Expected '{COL_RUN}' by default.)")
-
-    subset[COL_ENTRY_TIME] = pd.to_numeric(subset[COL_ENTRY_TIME], errors="coerce")
-    subset[COL_EXIT_TIME] = pd.to_numeric(subset[COL_EXIT_TIME], errors="coerce")
-
-    if T is None:
-        finite = subset[[COL_ENTRY_TIME, COL_EXIT_TIME]].replace([np.inf, -np.inf], np.nan).dropna(how="all")
-        if finite.empty:
-            raise ValueError("entry_time/exit_time are missing; cannot infer T.")
-        T = int(np.nanmax([finite[COL_ENTRY_TIME].max(), finite[COL_EXIT_TIME].max()])) + 1
-        T = max(T, 1)
-    T = int(max(T, 0))
-
-    curves = []
-    for _, run_df in subset.groupby(run_col):
-        c = _vehicles_on_road_over_time(run_df, T=T)
-        curves.append(np.asarray(c, dtype=float))
-
-    if len(curves) == 0:
-        raise ValueError("No per-run curves computed (check filters and data).")
-
-    M = np.vstack(curves)
-    mean_curve = M.mean(axis=0)
-    std_curve = M.std(axis=0, ddof=1) if M.shape[0] > 1 else np.zeros_like(mean_curve)
-    se_curve = std_curve / np.sqrt(M.shape[0]) if M.shape[0] > 1 else np.zeros_like(mean_curve)
-
-    t = np.arange(T)
-    plt.figure()
-    plt.plot(t, mean_curve, linewidth=2, label=f"Mean across {M.shape[0]} runs")
-    if show_band and M.shape[0] > 1:
-        plt.fill_between(t, mean_curve - 1.96 * se_curve, mean_curve + 1.96 * se_curve, alpha=0.15)
-
-    plt.title(f"Vehicles on road over time — N={N_value}, {strategy_value} (mean across runs)", fontsize=fs + 2)
-    plt.xlabel("Time slot", fontsize=fs)
-    plt.ylabel("# Vehicles active", fontsize=fs)
-    plt.grid(True, alpha=0.3)
-    plt.tick_params(axis="both", labelsize=fs - 2)
-    plt.legend(fontsize=fs - 2)
-    plt.tight_layout()
-    plt.show()
-
-    return (t, mean_curve)
-
-
-def plot_price_by_time_slot_per_strategy_meanmax_5000(
-    edge_timeslices_df: pd.DataFrame,
-    run_col: str | None = None,
-    strategies: list[str] | None = None,
-    N_value: int = 5000,
-    exclude_zero: bool = True,
-    fs: int = 18,
-):
-    """
-    For N=5000 only:
-      • one subplot per strategy (optionally excluding 'zero')
-      • per subplot: mean price(t) and max price(t)
-      • curves averaged across runs (mean over runs at each t)
-
-    Expected columns in edge_timeslices_df:
-      - COL_T, COL_PRICE, COL_STRATEGY, COL_N, COL_RUN (or pass run_col)
-    """
-    df = edge_timeslices_df.copy()
-
-    _require_cols(df, [COL_T, COL_PRICE, COL_STRATEGY, COL_N], "plot_price_by_time_slot_per_strategy_meanmax_5000")
-
-    if run_col is None:
-        run_col = COL_RUN
-    if run_col not in df.columns:
-        raise ValueError(f"Run column '{run_col}' not found. (Expected '{COL_RUN}' by default.)")
-
-    df[COL_T] = pd.to_numeric(df[COL_T], errors="coerce")
-    df[COL_PRICE] = pd.to_numeric(df[COL_PRICE], errors="coerce")
-    df[COL_N] = pd.to_numeric(df[COL_N], errors="coerce")
-    df = df.dropna(subset=[COL_T, COL_PRICE, COL_N])
-
-    df = df[df[COL_N] == N_value].copy()
-    if df.empty:
-        raise ValueError(f"No rows for N={N_value} in edge_timeslices_df.")
-
-    all_strats = list(pd.unique(df[COL_STRATEGY].astype(str)))
-    chosen = all_strats
-
-    if exclude_zero:
-        excl = {"0", "zero", "ZERO", "Zero"}
-        chosen = [s for s in chosen if s not in excl]
-
-    if strategies is not None:
-        strategies = [str(s) for s in strategies]
-        chosen = [s for s in chosen if s in set(strategies)]
-
-    if len(chosen) == 0:
-        raise ValueError("No strategies to plot after filtering.")
-
-    def _avg_across_runs(sub_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Returns DataFrame indexed by t with columns:
-          - mean_price: mean over runs of per-run mean price(t)
-          - max_price : mean over runs of per-run max  price(t)
-        """
-        all_t = np.unique(sub_df[COL_T].to_numpy())
-
-        per_run_mean = []
-        per_run_max = []
-        for _, g in sub_df.groupby(run_col):
-            rgrp = g.groupby(COL_T).agg(
-                mean_price=(COL_PRICE, "mean"),
-                max_price=(COL_PRICE, "max"),
-            ).sort_index()
-            r_aligned = rgrp.reindex(all_t)
-            per_run_mean.append(r_aligned["mean_price"].to_numpy())
-            per_run_max.append(r_aligned["max_price"].to_numpy())
-
-        M_mean = np.vstack(per_run_mean)
-        M_max = np.vstack(per_run_max)
-
-        out = pd.DataFrame(
-            {
-                "mean_price": np.nanmean(M_mean, axis=0),
-                "max_price": np.nanmean(M_max, axis=0),
-            },
-            index=all_t,
-        ).sort_index()
-        return out
-
-    n = len(chosen)
-    ncols = min(3, n)
-    nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5.2 * ncols, 3.8 * nrows), sharey=True)
-    axes = np.atleast_1d(axes).ravel()
-
-    handles, labels = None, None
-
-    for ax, strat in zip(axes, chosen):
-        ssub = df[df[COL_STRATEGY].astype(str) == str(strat)]
-        if ssub.empty:
-            ax.set_title(f"{strat} — (no data)", fontsize=fs + 1)
-            ax.grid(True, alpha=0.3)
-            continue
-
-        agg = _avg_across_runs(ssub)
-        if agg.empty:
-            ax.set_title(f"{strat} — (no data)", fontsize=fs + 1)
-            ax.grid(True, alpha=0.3)
-            continue
-
-        tvals = agg.index.values
-        l1, = ax.plot(tvals, agg["mean_price"].values, linewidth=2, label="mean price")
-        l2, = ax.plot(tvals, agg["max_price"].values, linewidth=1.75, label="max price")
-
-        ax.set_title(f"Price by time slot — {strat} (N={N_value}, avg over runs)", fontsize=fs + 1)
-        ax.set_xlabel("Time slot t", fontsize=fs)
-        ax.grid(True, alpha=0.3)
-        ax.tick_params(axis="both", labelsize=fs - 2)
-
-        if handles is None:
-            handles, labels = ax.get_legend_handles_labels()
-
-    axes[0].set_ylabel("Price", fontsize=fs)
-
-    for ax in axes[len(chosen) :]:
-        ax.axis("off")
-
-    if handles:
-        fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False, title="Curves", bbox_to_anchor=(0.5, 1.03))
-
-    plt.tight_layout()
-    plt.show()
-
-
 def _time_key_from_by(by: str) -> str:
     by = (by or "request").lower()
     if by == "entry":
@@ -1449,7 +1251,6 @@ def plot_transport_adapted_update_growth(
     p0: float = 1.0,
     steps: int = 80,
     scenarios=None,
-    dark_style: bool = True,
     save_path: str | None = None,
 ):
     """
@@ -1462,10 +1263,8 @@ def plot_transport_adapted_update_growth(
     vmax, bj, T, p0, steps:
         Global parameters used by the recurrence.
     scenarios:
-        List of dicts, each with keys: label, demand, tj, color.
+        List of dicts, each with keys: label, demand, tj.
         If None, a default set is used.
-    dark_style:
-        If True, use dark palette suitable for slides.
     save_path:
         Optional output path for saving the figure.
     """
@@ -1478,10 +1277,10 @@ def plot_transport_adapted_update_growth(
 
     if scenarios is None:
         scenarios = [
-            {"label": "Low demand (d/b=0.4), t=6", "demand": 0.4 * bj, "tj": 6, "color": "#3f88e0"},
-            {"label": "Medium demand (d/b=0.7), t=8", "demand": 0.7 * bj, "tj": 8, "color": "#ffc233"},
-            {"label": "High demand (d/b=1.0), t=8", "demand": 1.0 * bj, "tj": 8, "color": "#2fd4e8"},
-            {"label": "High demand (d/b=1.0), t=12", "demand": 1.0 * bj, "tj": 12, "color": "#ff5a43"},
+            {"label": "Low demand (d/b=0.4), t=6",   "demand": 0.4 * bj, "tj": 6},
+            {"label": "Medium demand (d/b=0.7), t=8", "demand": 0.7 * bj, "tj": 8},
+            {"label": "High demand (d/b=1.0), t=8",   "demand": 1.0 * bj, "tj": 8},
+            {"label": "High demand (d/b=1.0), t=12",  "demand": 1.0 * bj, "tj": 12},
         ]
 
     def _simulate_curve(demand: float, tj: float):
@@ -1497,60 +1296,28 @@ def plot_transport_adapted_update_growth(
             ys.append(p)
         return np.arange(steps + 1), np.array(ys), growth
 
-    fig, ax = plt.subplots(figsize=(11, 6.5), dpi=180)
-    if dark_style:
-        fig.patch.set_facecolor("#0b1324")
-        ax.set_facecolor("#0b1324")
-        grid_color = "white"
-        text_color = "#dfe5ef"
-        spine_color = "#d7dde7"
-        legend_face = "#0e1a2f"
-    else:
-        grid_color = "#6b7280"
-        text_color = "#111827"
-        spine_color = "#374151"
-        legend_face = "white"
+    fig, ax = plt.subplots(figsize=(11, 6.5))
 
     for sc in scenarios:
         x, y, growth = _simulate_curve(sc["demand"], sc["tj"])
-        ax.plot(
-            x,
-            y,
-            lw=2.6,
-            color=sc.get("color", None),
-            label=f"{sc['label']}  (growth factor a={growth:.3f})",
-        )
+        ax.plot(x, y, lw=2.0, label=f"{sc['label']}  (a={growth:.3f})")
 
-    ax.set_title("Transport-Adapted Price Update Growth", fontsize=20, color=text_color, pad=10)
-    ax.set_xlabel("Update step k (accepted units on edge)", fontsize=14, color=text_color)
-    ax.set_ylabel("Edge price p_k", fontsize=14, color=text_color)
-    ax.grid(True, color=grid_color, alpha=0.18)
-
-    for s in ax.spines.values():
-        s.set_color(spine_color)
-    ax.tick_params(colors=text_color, labelsize=11)
-
-    leg = ax.legend(loc="upper left", fontsize=10, frameon=True)
-    leg.get_frame().set_facecolor(legend_face)
-    leg.get_frame().set_edgecolor(spine_color)
-    leg.get_frame().set_alpha(0.7)
-    for t in leg.get_texts():
-        t.set_color(text_color)
+    ax.set_title("Transport-Adapted Price Update Growth", fontsize=16, pad=10)
+    ax.set_xlabel("Update step k (accepted units on edge)", fontsize=13)
+    ax.set_ylabel("Edge price $p_k$", fontsize=13)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis="both", labelsize=11)
+    ax.legend(loc="upper left", fontsize=10, frameon=False)
 
     formula = (
         r"$p_{k+1}=p_k\,e^{c_i/b_j}+\frac{b_j t_j}{T}\left(e^{c_i/b_j}-1\right),\ "
         r"c_i=\frac{\ln(1+v^{\max}_j)}{1-1/b_j}$"
     )
-    ax.text(0.02, 0.02, formula, transform=ax.transAxes, fontsize=11, color=text_color)
+    ax.text(0.02, 0.02, formula, transform=ax.transAxes, fontsize=10)
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(
-            save_path,
-            dpi=200,
-            facecolor=fig.get_facecolor() if dark_style else None,
-            bbox_inches="tight",
-        )
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
 
 
@@ -1563,15 +1330,13 @@ def plot_smooth_tail_pricing(
     n_points: int = 500,
     scenarios=None,
     show_transport_adapted: bool = True,
-    dark_style: bool = True,
     save_path: str | None = None,
 ):
     """Plot the Smooth Tail pricing function p(u) vs utilization u ∈ [0, 1].
 
     Shows the exponential segment on [0, u0] and the cubic Hermite tail on
     (u0, 1], with the transition point and blocking price V* = vmax+1 marked.
-    Optionally overlays the Transport-Adapted (pure exponential) curve for
-    comparison.
+    Optionally overlays the Transport-Adapted (pure exponential) curve (dashed).
 
     Parameters
     ----------
@@ -1580,9 +1345,8 @@ def plot_smooth_tail_pricing(
     T           : max_time_slots.
     u0          : transition point between exponential and Hermite segments.
     n_points    : number of u values for smooth curve rendering.
-    scenarios   : list of dicts with keys: label, demand, tj, color.
+    scenarios   : list of dicts with keys: label, demand, tj.
     show_transport_adapted : if True, overlay the pure-exponential curve (dashed).
-    dark_style  : dark background suitable for slides.
     save_path   : optional file path to save the figure.
     """
     from ExpandedTimeSimulation.simulation_zefat.strategies import SmoothTailPricingStrategy
@@ -1590,11 +1354,13 @@ def plot_smooth_tail_pricing(
 
     if scenarios is None:
         scenarios = [
-            {"label": "Low demand (d/b=0.4), t=6",   "demand": 0.4 * bj, "tj": 6,  "color": "#3f88e0"},
-            {"label": "Medium demand (d/b=0.7), t=8", "demand": 0.7 * bj, "tj": 8,  "color": "#ffc233"},
-            {"label": "High demand (d/b=1.0), t=8",   "demand": 1.0 * bj, "tj": 8,  "color": "#2fd4e8"},
-            {"label": "High demand (d/b=1.0), t=12",  "demand": 1.0 * bj, "tj": 12, "color": "#ff5a43"},
+            {"label": "Low demand (d/b=0.4), t=6",   "demand": 0.4 * bj, "tj": 6},
+            {"label": "Medium demand (d/b=0.7), t=8", "demand": 0.7 * bj, "tj": 8},
+            {"label": "High demand (d/b=1.0), t=8",   "demand": 1.0 * bj, "tj": 8},
+            {"label": "High demand (d/b=1.0), t=12",  "demand": 1.0 * bj, "tj": 12},
         ]
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     def _curve(demand, tj):
         vmax_j   = vmax * (min(demand, bj) / bj)
@@ -1611,70 +1377,42 @@ def plot_smooth_tail_pricing(
         ps_exp = np.array([strategy._p_orig(u, beta_j, lambda_j) for u in us])
         return us, ps, ps_exp
 
-    # ── styling ──────────────────────────────────────────────────────────────
-    if dark_style:
-        fig_bg = "#0b1324"; ax_bg = "#0b1324"
-        grid_c = "white";   text_c = "#dfe5ef"
-        spine_c = "#d7dde7"; leg_face = "#0e1a2f"
-        vline_c = "#a0b0c8"; vstar_c = "#7fff7f"
-    else:
-        fig_bg = "white";   ax_bg = "white"
-        grid_c = "#6b7280"; text_c = "#111827"
-        spine_c = "#374151"; leg_face = "white"
-        vline_c = "#6b7280"; vstar_c = "#2ca02c"
-
-    fig, ax = plt.subplots(figsize=(11, 6.5), dpi=180)
-    fig.patch.set_facecolor(fig_bg)
-    ax.set_facecolor(ax_bg)
-
+    fig, ax = plt.subplots(figsize=(11, 6.5))
     V_star = vmax + 1
 
-    for sc in scenarios:
+    for idx, sc in enumerate(scenarios):
+        c = colors[idx % len(colors)]
         us, ps, ps_exp = _curve(sc["demand"], sc["tj"])
-        ax.plot(us, ps, lw=2.6, color=sc["color"], label=sc["label"])
+        ax.plot(us, ps, lw=2.0, color=c, label=sc["label"])
         if show_transport_adapted:
-            ax.plot(us, ps_exp, lw=1.2, color=sc["color"], linestyle="--", alpha=0.45)
+            ax.plot(us, ps_exp, lw=1.2, color=c, linestyle="--", alpha=0.5)
 
-    # transition line
-    ax.axvline(u0, color=vline_c, lw=1.4, linestyle=":", alpha=0.8,
+    ax.axvline(u0, color="gray", lw=1.4, linestyle=":", alpha=0.7,
                label=f"transition u₀ = {u0}")
-    # blocking price reference
-    ax.axhline(V_star, color=vstar_c, lw=1.2, linestyle="--", alpha=0.7,
+    ax.axhline(V_star, color="black", lw=1.2, linestyle="--", alpha=0.5,
                label=f"V* = vmax+1 = {V_star:.0f}")
 
-    ax.set_title("Smooth Tail Pricing Function  p(u) vs utilization",
-                 fontsize=20, color=text_c, pad=10)
-    ax.set_xlabel("Utilization  u = alloc / capacity", fontsize=14, color=text_c)
-    ax.set_ylabel("Price  p(u)", fontsize=14, color=text_c)
+    ax.set_title("Smooth Tail Pricing Function  p(u) vs utilization", fontsize=16, pad=10)
+    ax.set_xlabel("Utilization  u = alloc / capacity", fontsize=13)
+    ax.set_ylabel("Price  p(u)", fontsize=13)
     ax.set_xlim(0, 1)
-    ax.grid(True, color=grid_c, alpha=0.18)
-
-    for s in ax.spines.values():
-        s.set_color(spine_c)
-    ax.tick_params(colors=text_c, labelsize=11)
-
-    leg = ax.legend(loc="upper left", fontsize=10, frameon=True)
-    leg.get_frame().set_facecolor(leg_face)
-    leg.get_frame().set_edgecolor(spine_c)
-    leg.get_frame().set_alpha(0.7)
-    for t in leg.get_texts():
-        t.set_color(text_c)
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis="both", labelsize=11)
+    ax.legend(loc="upper left", fontsize=10, frameon=False)
 
     if show_transport_adapted:
         ax.text(0.98, 0.35, "dashed = pure exponential (Transport-Adapted)",
-                transform=ax.transAxes, fontsize=9, color=text_c, ha="right", alpha=0.6)
+                transform=ax.transAxes, fontsize=9, ha="right", alpha=0.6)
 
     formula = (
         r"$p(u)=\beta_j(e^{\lambda_j u}-1)$ for $u\leq u_0$,  "
         r"Hermite tail for $u > u_0$,  $p(1)=v_{max}+1$"
     )
-    ax.text(0.02, 0.02, formula, transform=ax.transAxes, fontsize=10, color=text_c)
+    ax.text(0.02, 0.02, formula, transform=ax.transAxes, fontsize=10)
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=200,
-                    facecolor=fig.get_facecolor() if dark_style else None,
-                    bbox_inches="tight")
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
 
 
@@ -1761,21 +1499,19 @@ def plot_sim_diagnostics(
     excel_file,
     *,
     horizon_T: int | None = None,
-    fs: int = 15,
+    fs: int = 13,
 ):
-    """
-    Diagnostics runner using ONLY the explicit sheet/column constants (no guessing).
+    """Full diagnostic plot suite, grouped into 6 logical sections.
 
-    Requires these sheets (names exactly):
-      - SHEET_VEHICLES_TABLE
-      - SHEET_EDGE_TIMESLICES (optional for price curves)
+    Requires sheets: SHEET_VEHICLES_TABLE (mandatory), SHEET_EDGE_TIMESLICES (optional).
+    vehicles_table must contain: COL_RUN, COL_STRATEGY, COL_N, COL_SERVED.
 
-    And vehicles_table must contain at least:
-      COL_RUN, COL_STRATEGY, COL_N, COL_SERVED
-    Plus the columns needed by whichever plots you call below.
+    Plots NOT included here (already shown in earlier notebook cells):
+      - E2: demand / alpha histograms
+      - G2: per-strategy summary tables
+      - G3: rejection-reason counts
     """
     sheets = _read_sheets(excel_file)
-
     veh_tbl = sheets.get(SHEET_VEHICLES_TABLE, pd.DataFrame())
     ts_tbl = sheets.get(SHEET_EDGE_TIMESLICES, pd.DataFrame())
 
@@ -1788,21 +1524,23 @@ def plot_sim_diagnostics(
         raise ValueError(f"{SHEET_VEHICLES_TABLE} missing required columns: {missing}")
 
     def _try_plot(fn, *args, label="", **kwargs):
-        """Run a plot function and print a friendly warning instead of crashing."""
         try:
             fn(*args, **kwargs)
-        except (ValueError, KeyError, TypeError) as exc:
-            name = label or fn.__name__
-            print(f"[plot skipped] {name}: {exc}")
+        except Exception as exc:
+            print(f"[plot skipped] {label or fn.__name__}: {exc}")
 
-    # Request spread — shown first for immediate visibility
-    if isinstance(ts_tbl, pd.DataFrame) and not ts_tbl.empty:
-        _try_plot(plot_requests_over_time, ts_tbl, fs=fs)
-        _try_plot(plot_requests_heatmap, ts_tbl, top_n=20, fs=fs)
+    # Infer most common N for single-N plots
+    N_vals = pd.to_numeric(veh_tbl[COL_N], errors="coerce").dropna()
+    common_N = int(N_vals.value_counts().idxmax()) if not N_vals.empty else None
+    all_Ns = tuple(sorted(N_vals.unique().astype(int))) if not N_vals.empty else (common_N,)
 
+    # ── Group 1: Theoretical ──────────────────────────────────────────────────
+    print("── Strategy Design (theoretical) ──")
+    _try_plot(plot_pricing_function_shapes)
     _try_plot(plot_transport_adapted_update_growth)
 
-    # SW sweep (computed from vehicles_table)
+    # ── Group 2: Social Welfare Scaling ──────────────────────────────────────
+    print("── Social Welfare Scaling ──")
     try:
         df_sw = compute_sw_time_only_from_df(
             veh_tbl,
@@ -1814,128 +1552,151 @@ def plot_sim_diagnostics(
     except Exception as exc:
         print(f"[plot skipped] SW sweep: {exc}")
 
-    # % accepted over time (fee bands)
-    _try_plot(
-        plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
-        bands=((1, 2), (4, 5)), by="request",
-        fee_col=COL_LATENESS_FEE, mode="arrival", fs=fs,
-    )
+    # ── Group 3: Demand & Network Load ───────────────────────────────────────
+    print("── Demand & Network Load ──")
+    if isinstance(ts_tbl, pd.DataFrame) and not ts_tbl.empty:
+        _try_plot(plot_requests_over_time, ts_tbl, fs=fs)
+        _try_plot(plot_requests_heatmap, ts_tbl, top_n=20, fs=fs)
+        _try_plot(plot_utilization_distribution, ts_tbl,
+                  N_filter=common_N, fs=fs)
+    _try_plot(plot_mean_vehicles_on_road, veh_tbl,
+              N_value=common_N, strategy_value=None, T=horizon_T, fs=fs)
+
+    # ── Group 4: Acceptance & Rejection Dynamics ─────────────────────────────
+    print("── Acceptance & Rejection Dynamics ──")
+    _try_plot(plot_accepts_rejects_over_time, veh_tbl, by="request", fs=fs)
+    _try_plot(plot_acceptance_rate_over_time, veh_tbl, by="request", fs=fs)
+    _try_plot(plot_cumulative_accepts_rejects, veh_tbl, by="request", fs=fs)
     _try_plot(
         plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
         bands=((1, 2), (4, 5)), panels="bands",
         fee_col=COL_LATENESS_FEE, mode="arrival", fs=fs,
     )
-    _try_plot(
-        plot_percent_accepted_over_time_by_fee_bands_5000, veh_tbl,
-        panels="all", fee_col=COL_LATENESS_FEE,
-        mode="arrival", fs=max(8, fs - 3),
-    )
 
-    # price vs travel time
-    _try_plot(
-        plot_price_vs_travel_time_by_N, veh_tbl,
-        Ns=(1000, 5000, 10000), fs=fs,
-        price_col=COL_PAID_FEE, travel_time_col=COL_TRAVEL_TIME,
-    )
+    # ── Group 5: Price Dynamics ───────────────────────────────────────────────
+    print("── Price Dynamics ──")
+    if isinstance(ts_tbl, pd.DataFrame) and not ts_tbl.empty and common_N is not None:
+        _try_plot(plot_price_evolution_per_strategy, ts_tbl,
+                  N_value=common_N, exclude_zero=True, fs=fs)
 
-    # travel time vs alpha
-    _try_plot(plot_travel_time_vs_alpha_by_N, veh_tbl, bins=12, Ns=(5000, 10000), fs=fs + 2)
+    # ── Group 6: Vehicle Economics ────────────────────────────────────────────
+    print("── Vehicle Economics ──")
+    _try_plot(plot_travel_time_vs_alpha_by_N, veh_tbl,
+              bins=12, Ns=all_Ns, fs=fs)
+    _try_plot(plot_delay_or_arrival_vs_fee_by_N, veh_tbl,
+              pair="arrival", Ns=all_Ns, fs=fs)
+    _try_plot(plot_price_vs_travel_time_by_N, veh_tbl,
+              Ns=all_Ns, fs=fs, price_col=COL_PAID_FEE, travel_time_col=COL_TRAVEL_TIME)
+    _try_plot(plot_revenue_comparison, veh_tbl, fs=fs)
+    _try_plot(plot_toll_vs_alpha, veh_tbl, Ns=all_Ns, fs=fs)
 
-    # delay vs fee
-    _try_plot(plot_delay_or_arrival_vs_fee_by_N, veh_tbl, pair="arrival", Ns=(5000, 10000), fs=fs)
 
-    # vehicles on road (mean over runs)
-    _try_plot(plot_mean_vehicles_on_road_dynamic_5000, veh_tbl, T=horizon_T)
-
-    # price-by-time-slot (optional)
-    if isinstance(ts_tbl, pd.DataFrame) and (not ts_tbl.empty):
-        _try_plot(plot_price_by_time_slot_per_strategy_meanmax_5000, ts_tbl)
-
-    # accepts/rejects
-    _try_plot(plot_accepts_rejects_over_time, veh_tbl, by="request")
-    _try_plot(plot_acceptance_rate_over_time, veh_tbl, by="request")
-    _try_plot(plot_cumulative_accepts_rejects, veh_tbl, by="request")
-
-# New plot functions to add to plots.py
 
 def plot_mean_vehicles_on_road(
     df_vehicles: pd.DataFrame,
-    N_value: int,
-    strategy_value: str,
+    N_value: int | None = None,
+    strategy_value: str | None = None,
     T: int | None = None,
     run_col: str | None = None,
     show_band: bool = True,
     fs: int = 16,
 ):
     """
-    Generalized: compute and plot _vehicles_on_road_over_time per run for any N & strategy.
-    Aligns/pads to common T and plots the mean curve with optional 95% CI.
+    Compute and plot vehicles-on-road over time, averaged across runs.
 
     Parameters:
-      N_value      : filter to this vehicle count
-      strategy_value : filter to this strategy
-      T            : time horizon (auto-inferred if None)
-      run_col      : run identifier column (default: COL_RUN)
-      show_band    : show 95% confidence interval
-      fs           : font size
+      N_value        : filter to this vehicle count (auto-picks most common if None)
+      strategy_value : filter to this strategy; if None, plots all strategies as separate lines
+      T              : time horizon (auto-inferred if None)
+      run_col        : run identifier column (default: COL_RUN)
+      show_band      : show 95% CI band (only when strategy_value is given)
+      fs             : font size
 
-    Returns: (t, mean_curve)
+    Returns: (t, mean_curve) for single-strategy mode, or None for multi-strategy mode.
     """
     df = df_vehicles.copy()
-
-    _require_cols(df, [COL_N, COL_STRATEGY, COL_SERVED, COL_ENTRY_TIME, COL_EXIT_TIME], 
+    _require_cols(df, [COL_N, COL_STRATEGY, COL_SERVED, COL_ENTRY_TIME, COL_EXIT_TIME],
                   "plot_mean_vehicles_on_road")
-
-    subset = df[(df[COL_N] == N_value) & (df[COL_STRATEGY].astype(str) == str(strategy_value))].copy()
-    if subset.empty:
-        raise ValueError(f"No rows found for N={N_value} and strategy='{strategy_value}'.")
 
     if run_col is None:
         run_col = COL_RUN
-    if run_col not in subset.columns:
-        raise ValueError(f"Run column '{run_col}' not found.")
 
-    subset[COL_ENTRY_TIME] = pd.to_numeric(subset[COL_ENTRY_TIME], errors="coerce")
-    subset[COL_EXIT_TIME] = pd.to_numeric(subset[COL_EXIT_TIME], errors="coerce")
+    df[COL_N] = pd.to_numeric(df[COL_N], errors="coerce")
+    df[COL_ENTRY_TIME] = pd.to_numeric(df[COL_ENTRY_TIME], errors="coerce")
+    df[COL_EXIT_TIME] = pd.to_numeric(df[COL_EXIT_TIME], errors="coerce")
+
+    if N_value is None:
+        counts = df[COL_N].value_counts()
+        if counts.empty:
+            raise ValueError("No numeric N values found in data.")
+        N_value = int(counts.idxmax())
+
+    df_n = df[df[COL_N] == N_value].copy()
+    if df_n.empty:
+        raise ValueError(f"No rows found for N={N_value}.")
 
     if T is None:
-        finite = subset[[COL_ENTRY_TIME, COL_EXIT_TIME]].replace([np.inf, -np.inf], np.nan).dropna(how="all")
+        finite = df_n[[COL_ENTRY_TIME, COL_EXIT_TIME]].replace([np.inf, -np.inf], np.nan).dropna(how="all")
         if finite.empty:
             raise ValueError("entry_time/exit_time are missing; cannot infer T.")
         T = int(np.nanmax([finite[COL_ENTRY_TIME].max(), finite[COL_EXIT_TIME].max()])) + 1
         T = max(T, 1)
     T = int(max(T, 0))
 
-    curves = []
-    for _, run_df in subset.groupby(run_col):
-        c = _vehicles_on_road_over_time(run_df, T=T)
-        curves.append(np.asarray(c, dtype=float))
+    def _mean_curve_for_subset(sub):
+        curves = []
+        for _, run_df in sub.groupby(run_col):
+            c = _vehicles_on_road_over_time(run_df, T=T)
+            curves.append(np.asarray(c, dtype=float))
+        if not curves:
+            return None, None, None
+        M = np.vstack(curves)
+        mean_c = M.mean(axis=0)
+        se_c = (M.std(axis=0, ddof=1) / np.sqrt(M.shape[0])) if M.shape[0] > 1 else np.zeros_like(mean_c)
+        return np.arange(T), mean_c, se_c
 
-    if len(curves) == 0:
-        raise ValueError("No per-run curves computed.")
+    if strategy_value is not None:
+        # single-strategy mode
+        subset = df_n[df_n[COL_STRATEGY].astype(str) == str(strategy_value)]
+        if subset.empty:
+            raise ValueError(f"No rows for N={N_value}, strategy='{strategy_value}'.")
+        t, mean_curve, se_curve = _mean_curve_for_subset(subset)
+        if t is None:
+            raise ValueError("No per-run curves computed.")
 
-    M = np.vstack(curves)
-    mean_curve = M.mean(axis=0)
-    std_curve = M.std(axis=0, ddof=1) if M.shape[0] > 1 else np.zeros_like(mean_curve)
-    se_curve = std_curve / np.sqrt(M.shape[0]) if M.shape[0] > 1 else np.zeros_like(mean_curve)
-
-    t = np.arange(T)
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(t, mean_curve, linewidth=2.5, label=f"Mean ({M.shape[0]} runs)")
-    if show_band and M.shape[0] > 1:
-        ax.fill_between(t, mean_curve - 1.96 * se_curve, mean_curve + 1.96 * se_curve, 
-                       alpha=0.2, label="95% CI")
-
-    ax.set_title(f"Vehicles on road over time (N={N_value}, {strategy_value})", fontsize=fs + 2)
-    ax.set_xlabel("Time slot", fontsize=fs)
-    ax.set_ylabel("# Vehicles active", fontsize=fs)
-    ax.grid(True, alpha=0.3)
-    ax.tick_params(axis="both", labelsize=fs - 2)
-    ax.legend(fontsize=fs - 2)
-    plt.tight_layout()
-    plt.show()
-
-    return (t, mean_curve)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        n_runs = subset[run_col].nunique() if run_col in subset.columns else 1
+        ax.plot(t, mean_curve, linewidth=2.0, label=f"Mean ({n_runs} runs)")
+        if show_band and se_curve is not None and se_curve.any():
+            ax.fill_between(t, mean_curve - 1.96 * se_curve, mean_curve + 1.96 * se_curve,
+                            alpha=0.2, label="95% CI")
+        ax.set_title(f"Vehicles on road — N={N_value}, {strategy_value}", fontsize=fs + 2)
+        ax.set_xlabel("Time slot", fontsize=fs)
+        ax.set_ylabel("# Vehicles active", fontsize=fs)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=fs - 2)
+        ax.legend(fontsize=fs - 2, frameon=False)
+        plt.tight_layout()
+        plt.show()
+        return (t, mean_curve)
+    else:
+        # multi-strategy mode: one line per strategy
+        strategies = list(df_n[COL_STRATEGY].astype(str).unique())
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for strat in strategies:
+            sub = df_n[df_n[COL_STRATEGY].astype(str) == strat]
+            t, mean_c, _ = _mean_curve_for_subset(sub)
+            if t is not None:
+                ax.plot(t, mean_c, linewidth=2.0, label=strat)
+        ax.set_title(f"Vehicles on road over time — N={N_value} (mean per strategy)", fontsize=fs + 2)
+        ax.set_xlabel("Time slot", fontsize=fs)
+        ax.set_ylabel("# Vehicles active", fontsize=fs)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=fs - 2)
+        ax.legend(fontsize=fs - 2, frameon=False)
+        plt.tight_layout()
+        plt.show()
+        return None
 
 
 def plot_price_evolution_per_strategy(
@@ -2197,5 +1958,195 @@ def plot_strategy_comparison_table(
     if N_filter is not None:
         title += f" (N={N_filter})"
     plt.title(title, fontsize=fs + 2, pad=20, weight="bold")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_revenue_comparison(
+    veh_df: pd.DataFrame,
+    N_filter: int | None = None,
+    fs: int = 13,
+):
+    """Bar chart: total road toll (paid_fee) per strategy, grouped by N.
+
+    paid_fee = sum of edge prices along the path (monetary toll collected).
+    Entry/lateness delay fees are routing penalties only — not monetary payments.
+    Complements the numeric revenue table in G2 with a visual cross-N comparison.
+    """
+    _require_cols(veh_df, [COL_STRATEGY, COL_SERVED, COL_PAID_FEE, COL_N], "plot_revenue_comparison")
+
+    df = veh_df.copy()
+    df = df[df[COL_SERVED] == True].copy()
+    df[COL_PAID_FEE] = pd.to_numeric(df[COL_PAID_FEE], errors="coerce").fillna(0.0)
+    df[COL_N] = pd.to_numeric(df[COL_N], errors="coerce")
+    df = df.dropna(subset=[COL_N])
+
+    if N_filter is not None:
+        df = df[df[COL_N] == int(N_filter)].copy()
+
+    if df.empty:
+        print("plot_revenue_comparison: no served vehicles after filtering, skipping.")
+        return
+
+    agg = (
+        df.groupby([COL_N, COL_STRATEGY], as_index=False)[COL_PAID_FEE]
+        .sum()
+        .rename(columns={COL_PAID_FEE: "total_revenue"})
+    )
+    agg[COL_N] = agg[COL_N].astype(int)
+
+    Ns = sorted(agg[COL_N].unique())
+    strategies = list(agg[COL_STRATEGY].unique())
+    n_strats = len(strategies)
+    x = np.arange(len(Ns))
+    width = 0.8 / max(n_strats, 1)
+
+    fig, ax = plt.subplots(figsize=(max(7, 2.5 * len(Ns)), 5))
+    for i, strat in enumerate(strategies):
+        sub = agg[agg[COL_STRATEGY] == strat].set_index(COL_N)
+        vals = [sub.loc[n, "total_revenue"] if n in sub.index else 0.0 for n in Ns]
+        ax.bar(x + i * width - (n_strats - 1) * width / 2, vals, width, label=strat)
+
+    ax.set_title("Total Toll Revenue per Strategy", fontsize=fs + 2)
+    ax.set_xlabel("Fleet size N", fontsize=fs)
+    ax.set_ylabel("Total toll revenue (paid_fee sum)", fontsize=fs)
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(n) for n in Ns], fontsize=fs - 1)
+    ax.tick_params(axis="y", labelsize=fs - 1)
+    ax.grid(True, axis="y", alpha=0.3)
+    ax.legend(fontsize=fs - 1, frameon=False)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_toll_vs_alpha(
+    veh_df: pd.DataFrame,
+    Ns: tuple | list | None = None,
+    bins: int = 8,
+    fs: int = 13,
+):
+    """Line plot: mean road toll (paid_fee) vs alpha bins, one line per strategy.
+
+    paid_fee = edge-price tolls only (not delay penalties).
+    Shows whether high-urgency vehicles (high alpha, prefer time over price)
+    end up on more expensive, less congested edges — or simply pay more overall.
+    Subplots: one per N value.
+    """
+    _require_cols(veh_df, [COL_STRATEGY, COL_SERVED, COL_PAID_FEE, COL_ALPHA, COL_N],
+                  "plot_toll_vs_alpha")
+
+    df = veh_df.copy()
+    df = df[df[COL_SERVED] == True].copy()
+    df[COL_PAID_FEE] = pd.to_numeric(df[COL_PAID_FEE], errors="coerce")
+    df[COL_ALPHA] = pd.to_numeric(df[COL_ALPHA], errors="coerce")
+    df[COL_N] = pd.to_numeric(df[COL_N], errors="coerce")
+    df = df.dropna(subset=[COL_PAID_FEE, COL_ALPHA, COL_N])
+
+    if Ns is None:
+        Ns = sorted(df[COL_N].unique().astype(int))
+    else:
+        Ns = [int(n) for n in Ns]
+
+    nplots = len(Ns)
+    cols = min(3, nplots) if nplots else 1
+    rows = math.ceil(nplots / cols) if nplots else 1
+    fig, axes = plt.subplots(rows, cols, figsize=(5.5 * cols, 4.0 * rows), sharey=False)
+    axes = np.atleast_1d(axes).ravel()
+
+    strategies = list(df[COL_STRATEGY].astype(str).unique())
+    alpha_min = df[COL_ALPHA].min()
+    alpha_max = df[COL_ALPHA].max()
+    edges = np.linspace(alpha_min, alpha_max, bins + 1)
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    for ax_idx, N_val in enumerate(Ns):
+        ax = axes[ax_idx]
+        sub_n = df[df[COL_N] == N_val]
+        if sub_n.empty:
+            ax.set_title(f"N={N_val} (no data)", fontsize=fs + 1)
+            ax.grid(True, alpha=0.3)
+            continue
+        for strat in strategies:
+            sub_s = sub_n[sub_n[COL_STRATEGY].astype(str) == strat]
+            if sub_s.empty:
+                continue
+            means = []
+            for b in range(bins):
+                mask = (sub_s[COL_ALPHA] >= edges[b]) & (sub_s[COL_ALPHA] < edges[b + 1])
+                means.append(sub_s.loc[mask, COL_PAID_FEE].mean() if mask.any() else np.nan)
+            ax.plot(centers, means, linewidth=2.0, label=strat, marker="o", markersize=4)
+        ax.set_title(f"Toll vs α — N={N_val}", fontsize=fs + 1)
+        ax.set_xlabel("Alpha (urgency weight α)", fontsize=fs)
+        if ax_idx % cols == 0:
+            ax.set_ylabel("Mean road toll paid", fontsize=fs)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=fs - 1)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper center", ncol=min(4, len(labels)),
+                   frameon=False, fontsize=fs - 1, bbox_to_anchor=(0.5, 1.02))
+
+    for j in range(nplots, len(axes)):
+        axes[j].set_visible(False)
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    plt.show()
+
+
+def plot_utilization_distribution(
+    ts_tbl: pd.DataFrame,
+    N_filter: int | None = None,
+    fs: int = 13,
+):
+    """Boxplot: distribution of edge utilization per strategy.
+
+    Shows whether a pricing strategy spreads load evenly across edges
+    or allows some edges to become saturated while others stay empty.
+    Data: edge_timeslices sheet, 'utilization' column (alloc / capacity per edge-slot).
+    """
+    if ts_tbl.empty:
+        print("plot_utilization_distribution: empty data, skipping.")
+        return
+
+    util_col = COL_UTILIZATION if COL_UTILIZATION in ts_tbl.columns else "util"
+    if util_col not in ts_tbl.columns:
+        print("plot_utilization_distribution: no utilization column found, skipping.")
+        return
+
+    df = ts_tbl.copy()
+    df[util_col] = pd.to_numeric(df[util_col], errors="coerce")
+
+    if N_filter is not None and COL_N in df.columns:
+        df[COL_N] = pd.to_numeric(df[COL_N], errors="coerce")
+        df = df[df[COL_N] == int(N_filter)].copy()
+
+    df = df.dropna(subset=[util_col, COL_STRATEGY])
+    if df.empty:
+        print("plot_utilization_distribution: no data after filtering, skipping.")
+        return
+
+    strategies = sorted(df[COL_STRATEGY].astype(str).unique())
+    data_by_strat = [df.loc[df[COL_STRATEGY].astype(str) == s, util_col].values for s in strategies]
+
+    fig, ax = plt.subplots(figsize=(max(7, 2 * len(strategies)), 5))
+    bp = ax.boxplot(data_by_strat, labels=strategies, patch_artist=True,
+                    medianprops={"color": "black", "linewidth": 1.5},
+                    whiskerprops={"linewidth": 1.2},
+                    capprops={"linewidth": 1.2})
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.6)
+
+    title = "Edge Utilization Distribution per Strategy"
+    if N_filter is not None:
+        title += f" (N={N_filter})"
+    ax.set_title(title, fontsize=fs + 2)
+    ax.set_xlabel("Strategy", fontsize=fs)
+    ax.set_ylabel("Utilization (alloc / capacity)", fontsize=fs)
+    ax.tick_params(axis="both", labelsize=fs - 1)
+    ax.grid(True, axis="y", alpha=0.3)
+    plt.xticks(rotation=20, ha="right")
     plt.tight_layout()
     plt.show()

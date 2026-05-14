@@ -78,7 +78,7 @@ def preview_network(config: dict) -> None:
 
     graph_file = config.get("graph_file", "har_nof.gpickle")
     place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
-    od_count = config.get("od_count", 200)
+    od_count = config.get("od_count_start", config.get("od_count", 200))
     slot_seconds = config.get("slot_seconds", 60)
 
     loader = RealData(place_name, time_slot_duration=slot_seconds, od_count=od_count)
@@ -163,10 +163,10 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
 
     graph_file = config.get("graph_file", "har_nof.gpickle")
     place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
-    od_count = config.get("od_count", 200)
+    od_count = config.get("od_count_start", config.get("od_count", 200))
     slot_seconds = config.get("slot_seconds", 60)
     peak_slot = config.get("peak_slot", 10)
-    peak_sigma = config.get("peak_sigma", 5.0)
+    peak_sigma = config.get("peak_sigma_start", config.get("peak_sigma", 5.0))
     vehicle_T = config.get("vehicle_T", 100)
     base_seed = config.get("base_seed", 42)
     time_mode = config.get("time_mode", "both")
@@ -294,24 +294,31 @@ def plot_demand_distribution(vehicles: list[dict]) -> None:
 def run_experiment(config: dict) -> str:
     """Run the batch experiment and return the path to the output Excel file.
 
-    Thin wrapper around :func:`~experiments.batch_run.run_batch`.
+    Supports parameter sweeps: set start != end for exactly one of the three
+    sweep parameters (od_count, peak_sigma, capacity_factor).  The simulation
+    runs once per value in the generated range and results are merged into a
+    single Excel file with ``sweep_param`` / ``sweep_value`` columns added to
+    every sheet.
+
     Diagnostic plots are suppressed here — use :func:`plot_results` after.
     """
+    import numpy as np
+    import tempfile
+
     from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import run_batch
 
     excel_file = config.get("excel_file", "results.xlsx")
 
     strategy_keys = config.get("strategy_keys")
     if strategy_keys is not None:
-        strategy_keys = list(strategy_keys)  # ipywidgets SelectMultiple returns tuple
+        strategy_keys = list(strategy_keys)
 
-    run_batch(
+    # ── Shared non-sweep kwargs ──────────────────────────────────────────────
+    shared = dict(
         num_runs=config.get("num_runs", 1),
-        excel_file=excel_file,
         base_seed=config.get("base_seed", 2025),
         place_name=config.get("place_name", "Har Nof, Jerusalem, Israel"),
         graph_file=config.get("graph_file", "har_nof.gpickle"),
-        od_count=config.get("od_count", 200),
         max_time_slots=config.get("max_time_slots", 20),
         vmax=float(config.get("vmax", 100.0)),
         r=int(config.get("r", 30)),
@@ -319,11 +326,129 @@ def run_experiment(config: dict) -> str:
         slot_seconds=int(config.get("slot_seconds", 60)),
         vehicle_T=int(config.get("vehicle_T", 100)),
         peak_slot=int(config.get("peak_slot", 10)),
-        peak_sigma=float(config.get("peak_sigma", 5.0)),
         strategy_keys=strategy_keys or None,
-        run_diagnostics_plots=False,  # handled separately via plot_results()
+        run_diagnostics_plots=False,
         smooth_tail_u0=float(config.get("smooth_tail_u0", 0.95)),
+        time_mode=config.get("time_mode", "entry"),
+        arrival_percentage=float(config.get("arrival_percentage", 0.5)),
     )
+
+    # ── Build sweep ranges ───────────────────────────────────────────────────
+    def _int_range(start_key, end_key, step_key, default):
+        s = int(config.get(start_key, default))
+        e = int(config.get(end_key, default))
+        st = max(1, int(config.get(step_key, default)))
+        if s == e:
+            return [s]
+        return list(range(s, e + 1, st)) if s < e else [s]
+
+    def _float_range(start_key, end_key, step_key, default):
+        s = float(config.get(start_key, default))
+        e = float(config.get(end_key, default))
+        st = float(config.get(step_key, 1.0))
+        if abs(s - e) < 1e-9:
+            return [round(s, 6)]
+        if s > e:
+            return [round(s, 6)]
+        vals = np.arange(s, e + st * 0.5, st)
+        return [round(float(v), 6) for v in vals]
+
+    od_values = _int_range("od_count_start", "od_count_end", "od_count_step", 200)
+    sigma_values = _float_range("peak_sigma_start", "peak_sigma_end", "peak_sigma_step", 5.0)
+    # capacity factor stored as percentage in widgets → convert to fraction
+    cap_pct_values = _float_range("cap_factor_start", "cap_factor_end", "cap_factor_step", 100.0)
+    cap_values = [round(p / 100.0, 6) for p in cap_pct_values]
+
+    active_sweeps = []
+    if len(od_values) > 1:
+        active_sweeps.append("od_count")
+    if len(sigma_values) > 1:
+        active_sweeps.append("peak_sigma")
+    if len(cap_values) > 1:
+        active_sweeps.append("capacity_factor")
+
+    if len(active_sweeps) > 1:
+        raise ValueError(
+            f"Only one sweep parameter may have start ≠ end at a time. "
+            f"Currently active: {', '.join(active_sweeps)}."
+        )
+
+    # ── Single run (no sweep) ────────────────────────────────────────────────
+    if not active_sweeps:
+        run_batch(
+            excel_file=excel_file,
+            od_count=od_values[0],
+            peak_sigma=sigma_values[0],
+            capacity_factor=cap_values[0],
+            **shared,
+        )
+        return excel_file
+
+    # ── Sweep loop ───────────────────────────────────────────────────────────
+    sweep_param = active_sweeps[0]
+    if sweep_param == "od_count":
+        sweep_list = [(v, sigma_values[0], cap_values[0]) for v in od_values]
+    elif sweep_param == "peak_sigma":
+        sweep_list = [(od_values[0], v, cap_values[0]) for v in sigma_values]
+    else:  # capacity_factor
+        sweep_list = [(od_values[0], sigma_values[0], v) for v in cap_values]
+
+    print(f"Sweep: {sweep_param} over {len(sweep_list)} values")
+
+    temp_files: list[tuple[str, float]] = []
+    for od, sigma, cap in sweep_list:
+        raw_val = od if sweep_param == "od_count" else (sigma if sweep_param == "peak_sigma" else round(cap * 100, 2))
+        print(f"  {sweep_param} = {raw_val}")
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        run_batch(
+            excel_file=tmp_path,
+            od_count=int(od),
+            peak_sigma=float(sigma),
+            capacity_factor=float(cap),
+            **shared,
+        )
+        temp_files.append((tmp_path, raw_val))
+
+    # ── Merge all temp Excel files into one ──────────────────────────────────
+    from ExpandedTimeSimulation.simulation_zefat.constants import (
+        SHEET_EDGE_METRICS,
+        SHEET_EDGE_TIMESLICES,
+        SHEET_RUN_SUMMARY,
+        SHEET_VEHICLE_METRICS,
+        SHEET_VEHICLES_TABLE,
+    )
+    sheet_names = [
+        SHEET_VEHICLE_METRICS,
+        SHEET_EDGE_METRICS,
+        SHEET_VEHICLES_TABLE,
+        SHEET_EDGE_TIMESLICES,
+        SHEET_RUN_SUMMARY,
+    ]
+
+    merged: dict[str, list[pd.DataFrame]] = {s: [] for s in sheet_names}
+    for tmp_path, sweep_val in temp_files:
+        for sheet in sheet_names:
+            try:
+                df = pd.read_excel(tmp_path, sheet_name=sheet)
+                df.insert(0, "sweep_param", sweep_param)
+                df.insert(1, "sweep_value", sweep_val)
+                merged[sheet].append(df)
+            except Exception:
+                pass
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
+        for sheet in sheet_names:
+            frames = merged[sheet]
+            if frames:
+                pd.concat(frames, ignore_index=True).to_excel(writer, sheet_name=sheet, index=False)
+
+    print(f"\nSweep complete. Results saved to: {excel_file}")
     return excel_file
 
 

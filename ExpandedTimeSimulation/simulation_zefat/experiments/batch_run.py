@@ -51,6 +51,7 @@ from ExpandedTimeSimulation.simulation_zefat.constants import (
 from ExpandedTimeSimulation.simulation_zefat.experiments.vehicle_generation import (
     mixed_alpha_sampler,
     assign_peak_desired_entry,
+    assign_peak_desired_time_by_mode,
     PeakSchedule,
 )
 
@@ -255,6 +256,9 @@ def run_batch(
     distribute_demand: bool = False,
     distribute_od_count: int = 5000,
     smooth_tail_u0: float = 0.95,
+    time_mode: str = "entry",
+    arrival_percentage: float = 0.5,
+    capacity_factor: float = 1.0,
 ) -> None:
     """
     Runs multiple repetitions.
@@ -312,12 +316,13 @@ def run_batch(
         ]
     )
     vehicles = loader.generate_vehicles(alpha=alpha_mix)
-    assign_peak_desired_entry(
+    assign_peak_desired_time_by_mode(
         vehicles,
         schedule=PeakSchedule(
             peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
         ),
-        write_arrival=True,
+        mode=time_mode,
+        arrival_percentage=arrival_percentage,
     )
 
     # 3) Choose strategies
@@ -338,6 +343,12 @@ def run_batch(
         loader.seed = base_seed + run_idx  # if your RealData uses it internally
         loader.generate_od_pairs()
         base_edges = loader.convert_to_base_edges()
+
+        if capacity_factor != 1.0:
+            base_edges = [
+                (u, v, t, cap * capacity_factor, demand)
+                for u, v, t, cap, demand in base_edges
+            ]
 
         for strat_name, strat in strategies.items():
             print(f"  running strategy: {strat_name}")

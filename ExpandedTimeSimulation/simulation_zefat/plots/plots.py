@@ -788,22 +788,22 @@ def plot_sw_sweep(
         )
     )
 
-    fig, ax = plt.subplots()
-    for strat, sub in g.groupby(COL_STRATEGY):
-        sub = sub.sort_values(COL_N)
-        line, = ax.plot(sub[COL_N].values, sub["sw_mean"].values, marker="o", label=str(strat))
-        if show_bands and (sub["runs"] > 1).any():
-            std = sub["sw_std"].fillna(0).values
-            ax.fill_between(sub[COL_N].values, sub["sw_mean"].values - std, sub["sw_mean"].values + std, alpha=0.15)
-
-    ax.set_title("Social Welfare vs. Vehicles", fontsize=fs + 2)
-    ax.set_xlabel("Vehicles", fontsize=fs)
-    ax.set_ylabel("SW (sum)", fontsize=fs)
-    ax.tick_params(axis="both", which="major", labelsize=fs - 4)
-    ax.grid(True, alpha=0.3)
-    ax.legend(title="Strategy", fontsize=fs - 4, title_fontsize=fs - 2)
-    plt.tight_layout()
-    plt.show()
+    with plt.style.context("default"):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for strat, sub in g.groupby(COL_STRATEGY):
+            sub = sub.sort_values(COL_N)
+            ax.plot(sub[COL_N].values, sub["sw_mean"].values, marker="o", label=str(strat))
+            if show_bands and (sub["runs"] > 1).any():
+                std = sub["sw_std"].fillna(0).values
+                ax.fill_between(sub[COL_N].values, sub["sw_mean"].values - std, sub["sw_mean"].values + std, alpha=0.15)
+        ax.set_title("Social Welfare vs. Vehicles", fontsize=fs + 2)
+        ax.set_xlabel("Vehicles", fontsize=fs)
+        ax.set_ylabel("SW (sum)", fontsize=fs)
+        ax.tick_params(axis="both", which="major", labelsize=fs - 4)
+        ax.grid(True, alpha=0.3)
+        ax.legend(title="Strategy", fontsize=fs - 4, title_fontsize=fs - 2, frameon=False)
+        plt.tight_layout()
+        plt.show()
 
     base = g[g[COL_STRATEGY].astype(str) == str(baseline)][[COL_N, "sw_mean"]].rename(columns={"sw_mean": "sw_base"})
     comp = g[g[COL_STRATEGY].astype(str) == str(compare)][[COL_N, "sw_mean"]].rename(columns={"sw_mean": "sw_comp"})
@@ -815,25 +815,27 @@ def plot_sw_sweep(
     merged["delta"] = merged["sw_comp"] - merged["sw_base"]
     merged["pct"] = np.where(merged["sw_base"] != 0, 100.0 * merged["delta"] / merged["sw_base"], np.nan)
 
-    plt.figure()
-    plt.plot(merged[COL_N], merged["delta"], marker="o")
-    plt.title(f"ΔSW ({compare} − {baseline}) vs N", fontsize=fs + 2)
-    plt.xlabel("N", fontsize=fs)
-    plt.ylabel("ΔSW", fontsize=fs)
-    plt.grid(True, alpha=0.3)
-    plt.tick_params(axis="both", labelsize=fs - 4)
-    plt.tight_layout()
-    plt.show()
+    with plt.style.context("default"):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(merged[COL_N], merged["delta"], marker="o")
+        ax.set_title(f"ΔSW ({compare} − {baseline}) vs N", fontsize=fs + 2)
+        ax.set_xlabel("N", fontsize=fs)
+        ax.set_ylabel("ΔSW", fontsize=fs)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=fs - 4)
+        plt.tight_layout()
+        plt.show()
 
-    plt.figure()
-    plt.plot(merged[COL_N], merged["pct"], marker="o")
-    plt.title(f"% Improvement ({compare} vs {baseline}) vs N", fontsize=fs + 2)
-    plt.xlabel("N", fontsize=fs)
-    plt.ylabel("%", fontsize=fs)
-    plt.grid(True, alpha=0.3)
-    plt.tick_params(axis="both", labelsize=fs - 4)
-    plt.tight_layout()
-    plt.show()
+    with plt.style.context("default"):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(merged[COL_N], merged["pct"], marker="o")
+        ax.set_title(f"% Improvement ({compare} vs {baseline}) vs N", fontsize=fs + 2)
+        ax.set_xlabel("N", fontsize=fs)
+        ax.set_ylabel("%", fontsize=fs)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(axis="both", labelsize=fs - 4)
+        plt.tight_layout()
+        plt.show()
 
 
 def load_sw_from_sheets(sheets: dict, mode: str = "entry") -> pd.DataFrame:
@@ -1813,66 +1815,140 @@ def plot_price_evolution_per_strategy(
 
 
 def plot_pricing_function_shapes(
+    strategies=None,
     vmax: float = 100.0,
-    bj: int = 80,
-    T: int = 100,
+    bj: int = 20,
+    T: int = 20,
+    tj: float = 2.0,
+    r: int = 30,
+    p0: float = 0.0,
     fs: int = 14,
 ):
     """
-    Visualize theoretical pricing function shapes for different strategies.
-    Shows how edge prices grow with capacity utilization u ∈ [0, 1].
+    Plot the exact edge price as a function of utilization u = allocations / capacity.
 
-    Strategies compared:
-      - Exponential (transport-adapted style)
-      - Smooth tail (exponential + cubic Hermite)
-      - Zero pricing (baseline)
+    For recurrence-based strategies (Transport-Adapted, Online Competitive, Static Median)
+    the update rule is simulated for k = 0 … bj steps, plotted at u = k/bj.
+    For Smooth Tail the analytical formula p(u) is evaluated directly.
+    Zero Pricing is always flat at 0.
+
+    Parameters
+    ----------
+    strategies : list of strategy name strings (matching constants.STRAT_*).
+                 If None, shows all strategies.
+    bj         : representative edge capacity (allocation steps = bj → u = 1).
+    T, tj      : horizon and edge travel time for the additive component.
+    r          : Online Competitive base parameter.
+    p0         : initial toll (0 = edge starts free).
     """
-    u = np.linspace(0, 1, 200)
-    
-    # Exponential: p(u) = p0 * exp(lambda * u) where lambda ~ ln(1 + vmax) / (1 - 1/b)
-    lambda_exp = np.log(1 + vmax) / (1 - 1/bj) if bj > 1 else vmax
-    p_exp = np.exp(lambda_exp * u)
-    
-    # Smooth tail (u0 = 0.8): exponential until u0, then cubic Hermite
-    u0 = 0.8
-    p_tail = np.zeros_like(u)
-    p_tail[u <= u0] = np.exp(lambda_exp * u[u <= u0])
-    
-    # Cubic Hermite on (u0, 1]: p(u0) = exp(lambda*u0), p'(u0) = lambda*exp(...),
-    # p(1) = vmax+1, p'(1) = 0
-    u_tail = u[u > u0]
-    p_u0 = np.exp(lambda_exp * u0)
-    dp_u0 = lambda_exp * np.exp(lambda_exp * u0)
-    p_1 = vmax + 1
-    
-    # Hermite basis: H_{00}(t) = (1-t)^2(1+2t), H_{10}(t) = t(1-t)^2, etc
-    t = (u_tail - u0) / (1 - u0)
-    h00 = (1 - t)**2 * (1 + 2*t)
-    h10 = t * (1 - t)**2
-    h01 = t**2 * (3 - 2*t)
-    h11 = t**2 * (t - 1)
-    
-    p_tail[u > u0] = p_u0 * h00 + dp_u0 * (1 - u0) * h10 + p_1 * h01 + 0 * h11
-    
-    # Zero pricing
-    p_zero = np.zeros_like(u)
-    
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.plot(u, p_exp, linewidth=2.5, label="Exponential (Transport-Adapted)", color="#1f77b4")
-    ax.plot(u, p_tail, linewidth=2.5, label="Smooth Tail (smooth growth near capacity)", color="#ff7f0e", linestyle="-")
-    ax.axhline(y=vmax + 1, color="#2ca02c", linestyle=":", linewidth=2, label=f"Dual feasibility threshold (vmax+1={vmax+1})")
-    ax.plot(u, p_zero, linewidth=2.5, label="Zero Pricing (baseline)", color="#d62728", linestyle="--")
-    
-    # Mark transition point
-    ax.axvline(x=u0, color="gray", linestyle=":", alpha=0.5, label=f"Smooth tail transition u₀={u0}")
-    
-    ax.set_xlabel("Utilization u (edges used / edge capacity)", fontsize=fs)
-    ax.set_ylabel("Price per edge", fontsize=fs)
-    ax.set_title("Pricing Strategy Function Shapes", fontsize=fs + 2)
-    ax.grid(True, alpha=0.3)
+    from ExpandedTimeSimulation.simulation_zefat.constants import (
+        STRAT_ZERO, STRAT_TRANSPORT_ADAPTED, STRAT_STATIC_MEDIAN,
+        STRAT_ONLINE_COMPETITIVE, STRAT_SMOOTH_TAIL, ALL_STRATEGIES,
+    )
+
+    if strategies is None:
+        strategies = list(ALL_STRATEGIES)
+
+    us = np.arange(bj + 1) / bj  # u = 0, 1/bj, ..., 1
+    vmax_j = vmax  # full demand (demand = bj)
+
+    def _ta_prices():
+        ci = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
+        R = math.exp(ci / bj)
+        add = (bj * tj / T) * (R - 1)
+        ps, p = [p0], p0
+        for _ in range(bj):
+            p = p * R + add
+            ps.append(p)
+        return np.array(ps)
+
+    def _oc_prices():
+        s_max = float(bj)
+        c = math.log(1 + s_max * vmax) / (1 - 1 / r) if r > 1 else math.log(1 + s_max * vmax)
+        R = math.exp(c / bj)
+        add = (bj / s_max) * (R - 1)
+        ps, p = [p0], p0
+        for _ in range(bj):
+            p = p * R + add
+            ps.append(p)
+        return np.array(ps)
+
+    def _sm_prices():
+        ci = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
+        R = math.exp(ci / bj)
+        add = (bj * tj / T) * (R - 1)
+        p = p0
+        for _ in range(bj // 2):
+            p = p * R + add
+        return np.full(len(us), p)
+
+    def _st_prices(u0=0.95):
+        lambda_j = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
+        beta_j = tj / T
+        V_star = vmax + 1
+        h = 1 - u0
+
+        def p_exp(u):
+            return bj * beta_j * (math.exp(lambda_j * u) - 1)
+
+        def p_hermite(u):
+            p0h = beta_j * (math.exp(lambda_j * u0) - 1)
+            m0 = beta_j * lambda_j * math.exp(lambda_j * u0)
+            D = V_star - p0h
+            m1 = 0.5 * D / h
+            s = (u - u0) / h
+            s2, s3 = s * s, s * s * s
+            return bj * (
+                (2 * s3 - 3 * s2 + 1) * p0h
+                + (s3 - 2 * s2 + s) * h * m0
+                + (-2 * s3 + 3 * s2) * V_star
+                + (s3 - s2) * h * m1
+            )
+
+        return np.array([p_exp(u) if u <= u0 else p_hermite(u) for u in us])
+
+    def _zero_prices():
+        return np.zeros(len(us))
+
+    STRAT_FN = {
+        STRAT_TRANSPORT_ADAPTED:  (_ta_prices,  "-",              "Transport-Adapted Pricing"),
+        STRAT_ONLINE_COMPETITIVE: (_oc_prices,  "--",             "Online Competitive"),
+        STRAT_SMOOTH_TAIL:        (_st_prices,  "-.",             "Smooth Tail"),
+        STRAT_STATIC_MEDIAN:      (_sm_prices,  (0, (3, 1, 1, 1)), "Static Median"),
+        STRAT_ZERO:               (_zero_prices, ":",             "Zero (baseline)"),
+    }
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    color_idx = 0
+    smooth_tail_u0 = 0.95
+    for strat_name in strategies:
+        if strat_name not in STRAT_FN:
+            continue
+        fn, ls, label = STRAT_FN[strat_name]
+        try:
+            prices = fn()
+            ax.plot(us, prices, lw=2.5, label=label, linestyle=ls,
+                    color=colors[color_idx % len(colors)])
+            if strat_name == STRAT_SMOOTH_TAIL:
+                ax.axvline(smooth_tail_u0, color=colors[color_idx % len(colors)],
+                           lw=0.9, linestyle=":", alpha=0.5,
+                           label=f"Smooth Tail transition u₀={smooth_tail_u0}")
+            color_idx += 1
+        except Exception as exc:
+            print(f"[plot_pricing_function_shapes] {strat_name}: {exc}")
+
+    ax.set_xlabel("Utilization  u = allocations / capacity", fontsize=fs)
+    ax.set_ylabel("Edge price (toll)", fontsize=fs)
+    ax.set_title(
+        f"Pricing Function Shapes  (capacity={bj}, T={T}, travel_time={tj}, vmax={vmax})",
+        fontsize=fs + 2,
+    )
     ax.set_xlim(0, 1)
     ax.set_ylim(bottom=0)
-    ax.legend(fontsize=fs - 2, loc="upper left")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=fs - 2, loc="upper left", frameon=False)
     ax.tick_params(axis="both", labelsize=fs - 2)
     plt.tight_layout()
     plt.show()

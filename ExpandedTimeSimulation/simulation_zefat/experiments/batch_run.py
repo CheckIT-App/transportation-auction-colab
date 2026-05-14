@@ -259,6 +259,12 @@ def run_batch(
     time_mode: str = "entry",
     arrival_percentage: float = 0.5,
     capacity_factor: float = 1.0,
+    alpha_lo: float = 0.0,
+    alpha_hi: float = 1.0,
+    entry_fee_lo: float = 1.0,
+    entry_fee_hi: float = 5.0,
+    lateness_fee_lo: float = 1.0,
+    lateness_fee_hi: float = 5.0,
 ) -> None:
     """
     Runs multiple repetitions.
@@ -308,14 +314,11 @@ def run_batch(
         distribute_od_count=distribute_od_count,
     )
     # 2) Generate vehicles once (copied per strategy/run)
-    alpha_mix = mixed_alpha_sampler(
-        [
-            (0.4, (0.0, 0.3)),
-            (0.4, (0.3, 0.7)),
-            (0.2, (0.7, 1.0)),
-        ]
+    vehicles = loader.generate_vehicles(
+        alpha=(alpha_lo, alpha_hi),
+        entry_fee_range=(entry_fee_lo, entry_fee_hi),
+        lateness_fee_range=(lateness_fee_lo, lateness_fee_hi),
     )
-    vehicles = loader.generate_vehicles(alpha=alpha_mix)
     assign_peak_desired_time_by_mode(
         vehicles,
         schedule=PeakSchedule(

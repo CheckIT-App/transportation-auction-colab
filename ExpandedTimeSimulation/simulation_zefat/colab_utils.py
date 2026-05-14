@@ -331,6 +331,12 @@ def run_experiment(config: dict) -> str:
         smooth_tail_u0=float(config.get("smooth_tail_u0", 0.95)),
         time_mode=config.get("time_mode", "entry"),
         arrival_percentage=float(config.get("arrival_percentage", 0.5)),
+        alpha_lo=float(config.get("alpha_lo", 0.0)),
+        alpha_hi=float(config.get("alpha_hi", 1.0)),
+        entry_fee_lo=float(config.get("entry_fee_lo", 1.0)),
+        entry_fee_hi=float(config.get("entry_fee_hi", 5.0)),
+        lateness_fee_lo=float(config.get("lateness_fee_lo", 1.0)),
+        lateness_fee_hi=float(config.get("lateness_fee_hi", 5.0)),
     )
 
     # ── Build sweep ranges ───────────────────────────────────────────────────
@@ -450,6 +456,189 @@ def run_experiment(config: dict) -> str:
 
     print(f"\nSweep complete. Results saved to: {excel_file}")
     return excel_file
+
+
+# ---------------------------------------------------------------------------
+# Custom X/Y plot
+# ---------------------------------------------------------------------------
+
+_X_LABELS: dict[str, str] = {
+    "time_slot":         "Time Slot",
+    "vehicles_sweep":    "Number of Vehicles",
+    "sigma_sweep":       "Peak Sigma",
+    "capacity_sweep":    "Capacity Factor (%)",
+    "alpha":             "Alpha",
+    "entry_delay_cost":  "Entry Delay Cost",
+    "arrival_delay_cost":"Arrival Delay Cost",
+}
+
+_Y_LABELS: dict[str, str] = {
+    "social_welfare":   "Social Welfare",
+    "acceptance":       "% Acceptance",
+    "avg_price":        "Avg Price per Route",
+    "avg_entry_delay":  "Avg Entry Delay (slots)",
+    "avg_arrival_delay":"Avg Arrival Delay (slots)",
+    "speed":            "Speed (path-units / slot)",
+    "travel_time":      "Avg Travel Time (slots)",
+}
+
+_SWEEP_PARAM_MAP: dict[str, str] = {
+    "vehicles_sweep": "od_count",
+    "sigma_sweep":    "peak_sigma",
+    "capacity_sweep": "capacity_factor",
+}
+
+
+def plot_custom(
+    excel_file: str,
+    x_metric: str,
+    y_metric: str,
+    strategies: list[str] | None = None,
+    n_bins: int = 10,
+) -> None:
+    """Plot any Y metric against any X metric, one line per strategy.
+
+    x_metric choices: time_slot | vehicles_sweep | sigma_sweep | capacity_sweep |
+                      alpha | entry_delay_cost | arrival_delay_cost
+    y_metric choices: social_welfare | acceptance | avg_price |
+                      avg_entry_delay | avg_arrival_delay | speed | travel_time
+    """
+    import numpy as np
+    from ExpandedTimeSimulation.simulation_zefat.constants import (
+        SHEET_VEHICLES_TABLE,
+        COL_STRATEGY,
+        COL_RUN,
+    )
+
+    try:
+        vt = pd.read_excel(excel_file, sheet_name=SHEET_VEHICLES_TABLE)
+    except Exception as exc:
+        print(f"Could not read '{excel_file}': {exc}")
+        return
+
+    if vt.empty:
+        print("vehicles_table sheet is empty — run the simulation first.")
+        return
+
+    # ── Ensure sweep columns exist ───────────────────────────────────────────
+    if "sweep_param" not in vt.columns:
+        vt["sweep_param"] = None
+    if "sweep_value" not in vt.columns:
+        vt["sweep_value"] = float("nan")
+
+    # ── Derive computed columns ──────────────────────────────────────────────
+    vt["entry_delay_cost"]    = vt.get("entry_fee",    0) * vt.get("entry_delay",    0)
+    vt["arrival_delay_cost"]  = vt.get("lateness_fee", 0) * vt.get("arrival_delay",  0)
+    travel_time_safe          = pd.to_numeric(vt.get("travel_time"), errors="coerce").replace(0, float("nan"))
+    vt["speed"]               = pd.to_numeric(vt.get("path_len"), errors="coerce") / travel_time_safe
+
+    # ── Filter strategies ────────────────────────────────────────────────────
+    if strategies:
+        vt = vt[vt[COL_STRATEGY].isin(strategies)]
+
+    # ── Resolve X column & binning ───────────────────────────────────────────
+    bin_x = False
+    if x_metric in _SWEEP_PARAM_MAP:
+        param_key = _SWEEP_PARAM_MAP[x_metric]
+        if vt["sweep_param"].isna().all() or not (vt["sweep_param"] == param_key).any():
+            print(
+                f"Warning: no sweep data found for '{param_key}'. "
+                "Run the simulation with this parameter as a sweep first."
+            )
+            return
+        vt = vt[vt["sweep_param"] == param_key].copy()
+        x_col = "sweep_value"
+    elif x_metric == "time_slot":
+        x_col = "entry_time"
+    else:
+        x_col = x_metric  # "alpha", "entry_delay_cost", "arrival_delay_cost"
+        bin_x = True
+
+    vt[x_col] = pd.to_numeric(vt[x_col], errors="coerce")
+    vt = vt.dropna(subset=[x_col])
+
+    if bin_x:
+        try:
+            vt["_x_bin"] = pd.cut(vt[x_col], bins=n_bins)
+            vt["_x_mid"] = vt["_x_bin"].apply(lambda b: b.mid if pd.notna(b) else float("nan"))
+        except Exception as exc:
+            print(f"Binning failed: {exc}")
+            return
+        x_col = "_x_mid"
+
+    # ── Y aggregation function ───────────────────────────────────────────────
+    def _agg_y(grp: pd.DataFrame) -> float:
+        served_mask = grp["served"].astype(bool) if "served" in grp.columns else pd.Series(True, index=grp.index)
+        if y_metric == "social_welfare":
+            return grp.loc[served_mask, "reserve"].sum() if "reserve" in grp.columns else float("nan")
+        if y_metric == "acceptance":
+            return served_mask.mean() * 100.0
+        if y_metric == "avg_price":
+            vals = grp.loc[served_mask, "paid_fee"] if "paid_fee" in grp.columns else pd.Series(dtype=float)
+            return vals.mean() if not vals.empty else float("nan")
+        if y_metric == "avg_entry_delay":
+            return grp["entry_delay"].mean() if "entry_delay" in grp.columns else float("nan")
+        if y_metric == "avg_arrival_delay":
+            return grp["arrival_delay"].mean() if "arrival_delay" in grp.columns else float("nan")
+        if y_metric == "speed":
+            vals = grp.loc[served_mask, "speed"] if "speed" in grp.columns else pd.Series(dtype=float)
+            return vals.mean() if not vals.empty else float("nan")
+        if y_metric == "travel_time":
+            vals = grp.loc[served_mask, "travel_time"] if "travel_time" in grp.columns else pd.Series(dtype=float)
+            return vals.mean() if not vals.empty else float("nan")
+        return float("nan")
+
+    # ── Aggregate: per (x, strategy, run) then average runs ─────────────────
+    run_col = COL_RUN if COL_RUN in vt.columns else "run"
+    if run_col not in vt.columns:
+        vt[run_col] = 1
+
+    records = []
+    for (x_val, strat, run_id), grp in vt.groupby([x_col, COL_STRATEGY, run_col], observed=True):
+        records.append({"x": x_val, "strategy": strat, "run": run_id, "y": _agg_y(grp)})
+
+    if not records:
+        print("No data to plot after grouping.")
+        return
+
+    agg_df = pd.DataFrame(records)
+    summary = (
+        agg_df.groupby(["x", "strategy"], observed=True)["y"]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    summary.columns = ["x", "strategy", "y_mean", "y_std"]
+    summary["y_std"] = summary["y_std"].fillna(0.0)
+
+    n_runs = agg_df["run"].nunique()
+    show_band = n_runs > 1
+
+    # ── Plot ─────────────────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for i, (strat, sdf) in enumerate(summary.groupby("strategy", observed=True)):
+        sdf = sdf.sort_values("x")
+        x_vals = sdf["x"].values
+        y_vals = sdf["y_mean"].values
+        y_std  = sdf["y_std"].values
+        color  = colors[i % len(colors)]
+
+        ax.plot(x_vals, y_vals, marker="o", label=strat, color=color, linewidth=1.8)
+        if show_band:
+            ax.fill_between(x_vals, y_vals - y_std, y_vals + y_std,
+                            color=color, alpha=0.15)
+
+    ax.set_xlabel(_X_LABELS.get(x_metric, x_metric), fontsize=12)
+    ax.set_ylabel(_Y_LABELS.get(y_metric, y_metric), fontsize=12)
+    ax.set_title(
+        f"{_Y_LABELS.get(y_metric, y_metric)}  vs  {_X_LABELS.get(x_metric, x_metric)}",
+        fontsize=13,
+    )
+    ax.legend(title="Strategy", fontsize=10)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
 
 # ---------------------------------------------------------------------------

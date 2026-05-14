@@ -213,6 +213,8 @@ class RealData:
         reserve_range: tuple[float, float] = (1.0, 30.0),
         alpha: AlphaSpec = (0.2, 0.9),
         desired_entry: Optional[int] = 0,
+        entry_fee_range: tuple[float, float] = (1.0, 5.0),
+        lateness_fee_range: tuple[float, float] = (1.0, 5.0),
     ) -> list[dict]:
         """Generate vehicle dicts from OD pairs with sampled reserve and alpha values."""
         if not self.od_pairs:
@@ -230,8 +232,8 @@ class RealData:
                     "desired_entry": 0 if desired_entry is None else desired_entry,
                     "desired_arrival": 0 if desired_entry is None else desired_entry,
                     "mode": "arrive",
-                    "entry_fee": random.uniform(1, 5),
-                    "lateness_fee": random.uniform(1, 5),
+                    "entry_fee": random.uniform(*entry_fee_range),
+                    "lateness_fee": random.uniform(*lateness_fee_range),
                     "reserve": reserve,
                     "alpha": a,
                     "N": self.od_count,

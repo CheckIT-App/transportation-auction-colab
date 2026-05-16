@@ -236,8 +236,9 @@ class TimeExpandedRoadNetwork:
                 elif edge[1] == vt and vehicle.get("mode") == "arrive":
                     fee_rate = vehicle.get("lateness_fee", 1.0)
                     desired = vehicle.get("desired_arrival")
-                    if desired is not None:
-                        arrival_delay = abs(edge[0][1] - desired)
+                    edge_time = edge[0][1] if isinstance(edge[0], tuple) else None
+                    if desired is not None and edge_time is not None:
+                        arrival_delay = abs(edge_time - desired)
                         cost += fee_rate * arrival_delay
             return cost
 

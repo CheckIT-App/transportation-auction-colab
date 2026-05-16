@@ -146,16 +146,17 @@ def assign_peak_desired_time_by_mode(
         
         if mode == "entry":
             v[COL_DESIRED_ENTRY] = t
-            # Don't touch desired_arrival
+            v[COL_DESIRED_ARRIVAL] = None
         elif mode == "arrival":
             v[COL_DESIRED_ARRIVAL] = t
-            # Don't touch desired_entry
+            v[COL_DESIRED_ENTRY] = None
         elif mode == "both":
-            # Randomly choose: arrival_percentage of vehicles get arrival, rest get entry
             if random.random() < arrival_percentage:
                 v[COL_DESIRED_ARRIVAL] = t
+                v[COL_DESIRED_ENTRY] = None
             else:
                 v[COL_DESIRED_ENTRY] = t
+                v[COL_DESIRED_ARRIVAL] = None
         else:
             raise ValueError(f"Unknown mode: {mode}. Must be 'entry', 'arrival', or 'both'.")
 

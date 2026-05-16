@@ -229,8 +229,8 @@ class RealData:
                 {
                     "source": o,
                     "destination": d,
-                    "desired_entry": 0 if desired_entry is None else desired_entry,
-                    "desired_arrival": 0 if desired_entry is None else desired_entry,
+                    "desired_entry": None,
+                    "desired_arrival": None,
                     "mode": "arrive",
                     "entry_fee": random.uniform(*entry_fee_range),
                     "lateness_fee": random.uniform(*lateness_fee_range),

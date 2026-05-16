@@ -640,6 +640,8 @@ def plot_custom(
     plt.tight_layout()
     plt.show()
 
+    return summary
+
 
 # ---------------------------------------------------------------------------
 # Results loading and summary

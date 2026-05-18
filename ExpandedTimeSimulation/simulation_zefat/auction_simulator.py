@@ -181,7 +181,7 @@ class AuctionSimulator:
                     weight=weight,
                 )
             elif self.path_solver == "reverse_astar_ff":
-                if vehicle.get("mode") == "arrive":
+                if vehicle.get("mode") == "arrival":
                     # Arrival mode: reverse search is usually more effective.
                     self._ensure_fflb_from_source(src_phys)
                     Gr = self.G.reverse(copy=False)
@@ -293,7 +293,7 @@ class AuctionSimulator:
                 h = 0.0
             else:
                 h = alpha * dist
-                if mode == "arrive" and desired_arrival is not None and lateness_fee > 0:
+                if mode == "arrival" and desired_arrival is not None and lateness_fee > 0:
                     earliest_arrival = t_now + dist
                     # Since time only moves forward, if earliest arrival is already late,
                     # this lateness is unavoidable and can be added as a lower bound.

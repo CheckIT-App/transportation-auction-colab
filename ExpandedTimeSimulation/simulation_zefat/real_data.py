@@ -231,7 +231,7 @@ class RealData:
                     "destination": d,
                     "desired_entry": None,
                     "desired_arrival": None,
-                    "mode": "arrive",
+                    "mode": "arrival",
                     "entry_fee": random.uniform(*entry_fee_range),
                     "lateness_fee": random.uniform(*lateness_fee_range),
                     "reserve": reserve,

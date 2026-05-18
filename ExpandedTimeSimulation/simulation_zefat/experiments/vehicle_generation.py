@@ -143,20 +143,24 @@ def assign_peak_desired_time_by_mode(
     """
     for v in vehicles:
         t = sample_peak_time(schedule.peak_slot, schedule.sigma, schedule.horizon_T)
-        
+
         if mode == "entry":
             v[COL_DESIRED_ENTRY] = t
             v[COL_DESIRED_ARRIVAL] = None
+            v["mode"] = "entry"
         elif mode == "arrival":
             v[COL_DESIRED_ARRIVAL] = t
             v[COL_DESIRED_ENTRY] = None
+            v["mode"] = "arrival"
         elif mode == "both":
             if random.random() < arrival_percentage:
                 v[COL_DESIRED_ARRIVAL] = t
                 v[COL_DESIRED_ENTRY] = None
+                v["mode"] = "arrival"
             else:
                 v[COL_DESIRED_ENTRY] = t
                 v[COL_DESIRED_ARRIVAL] = None
+                v["mode"] = "entry"
         else:
             raise ValueError(f"Unknown mode: {mode}. Must be 'entry', 'arrival', or 'both'.")
 

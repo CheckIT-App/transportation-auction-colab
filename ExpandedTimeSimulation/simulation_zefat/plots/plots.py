@@ -1250,7 +1250,7 @@ def plot_transport_adapted_update_growth(
     vmax: float = 100.0,
     bj: int = 80,
     T: int = 100,
-    p0: float = 1.0,
+    p0: float = 0.0,
     steps: int = 80,
     scenarios=None,
     save_path: str | None = None,
@@ -1285,17 +1285,28 @@ def plot_transport_adapted_update_growth(
             {"label": "High demand (d/b=1.0), t=12",  "demand": 1.0 * bj, "tj": 12},
         ]
 
-    def _simulate_curve(demand: float, tj: float):
+    def _simulate_curve(demand: float, tj_val: float):
+        import types
+        from ExpandedTimeSimulation.simulation_zefat.strategies import DynamicPricingStrategy
+        from ExpandedTimeSimulation.simulation_zefat.edge_data import EdgeData
+
+        strat = DynamicPricingStrategy()
+        edge = EdgeData(time=tj_val, capacity=bj, demand=demand)
+        edge.price = float(p0)
+        net = types.SimpleNamespace(
+            vmax=vmax, max_time_slots=T,
+            edge_data={0: edge},
+        )
+
+        ys = [edge.price]
+        for _ in range(steps):
+            edge.alloc_count += 1
+            strat.update_price(net, 0, None, None)
+            ys.append(edge.price)
+
         vmax_j = vmax * (min(demand, bj) / bj)
         ci = math.log(1.0 + vmax_j) / (1.0 - 1.0 / bj)
         growth = math.exp(ci / bj)
-        additive = (bj * tj / T) * (growth - 1.0)
-
-        p = float(p0)
-        ys = [p]
-        for _ in range(steps):
-            p = p * growth + additive
-            ys.append(p)
         return np.arange(steps + 1), np.array(ys), growth
 
     fig, ax = plt.subplots(figsize=(11, 6.5))
@@ -1841,81 +1852,45 @@ def plot_pricing_function_shapes(
     r          : Online Competitive base parameter.
     p0         : initial toll (0 = edge starts free).
     """
+    import types
     from ExpandedTimeSimulation.simulation_zefat.constants import (
         STRAT_ZERO, STRAT_TRANSPORT_ADAPTED, STRAT_STATIC_MEDIAN,
         STRAT_ONLINE_COMPETITIVE, STRAT_SMOOTH_TAIL, ALL_STRATEGIES,
     )
+    from ExpandedTimeSimulation.simulation_zefat.strategy_factory import make_strategy
+    from ExpandedTimeSimulation.simulation_zefat.edge_data import EdgeData
 
     if strategies is None:
         strategies = list(ALL_STRATEGIES)
 
     us = np.arange(bj + 1) / bj  # u = 0, 1/bj, ..., 1
-    vmax_j = vmax  # full demand (demand = bj)
+    s_max = float(bj)             # used by Online Competitive
 
-    def _ta_prices():
-        ci = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
-        R = math.exp(ci / bj)
-        add = (bj * tj / T) * (R - 1)
-        ps, p = [p0], p0
+    net = types.SimpleNamespace(vmax=vmax, max_time_slots=T, r=r, edge_data={})
+
+    def _simulate(strat_key: str) -> np.ndarray:
+        strat = make_strategy(strat_key)
+        edge = EdgeData(time=tj, capacity=bj, demand=bj)
+        edge.price = float(p0)
+        net.edge_data = {0: edge}
+
+        if strat_key == STRAT_STATIC_MEDIAN:
+            strat.init_price(net, 0)
+            return np.full(bj + 1, edge.price)
+
+        prices = [edge.price]
         for _ in range(bj):
-            p = p * R + add
-            ps.append(p)
-        return np.array(ps)
-
-    def _oc_prices():
-        s_max = float(bj)
-        c = math.log(1 + s_max * vmax) / (1 - 1 / r) if r > 1 else math.log(1 + s_max * vmax)
-        R = math.exp(c / bj)
-        add = (bj / s_max) * (R - 1)
-        ps, p = [p0], p0
-        for _ in range(bj):
-            p = p * R + add
-            ps.append(p)
-        return np.array(ps)
-
-    def _sm_prices():
-        ci = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
-        R = math.exp(ci / bj)
-        add = (bj * tj / T) * (R - 1)
-        p = p0
-        for _ in range(bj // 2):
-            p = p * R + add
-        return np.full(len(us), p)
-
-    def _st_prices(u0=0.95):
-        lambda_j = math.log(1 + vmax_j) / (1 - 1 / bj) if bj > 1 else math.log(1 + vmax_j)
-        beta_j = tj / T
-        V_star = vmax + 1
-        h = 1 - u0
-
-        def p_exp(u):
-            return bj * beta_j * (math.exp(lambda_j * u) - 1)
-
-        def p_hermite(u):
-            p0h = beta_j * (math.exp(lambda_j * u0) - 1)
-            m0 = beta_j * lambda_j * math.exp(lambda_j * u0)
-            D = V_star - p0h
-            m1 = 0.5 * D / h
-            s = (u - u0) / h
-            s2, s3 = s * s, s * s * s
-            return bj * (
-                (2 * s3 - 3 * s2 + 1) * p0h
-                + (s3 - 2 * s2 + s) * h * m0
-                + (-2 * s3 + 3 * s2) * V_star
-                + (s3 - s2) * h * m1
-            )
-
-        return np.array([p_exp(u) if u <= u0 else p_hermite(u) for u in us])
-
-    def _zero_prices():
-        return np.zeros(len(us))
+            edge.alloc_count += 1
+            strat.update_price(net, 0, None, s_max)
+            prices.append(edge.price)
+        return np.array(prices)
 
     STRAT_FN = {
-        STRAT_TRANSPORT_ADAPTED:  (_ta_prices,  "-",              "Transport-Adapted Pricing"),
-        STRAT_ONLINE_COMPETITIVE: (_oc_prices,  "--",             "Online Competitive"),
-        STRAT_SMOOTH_TAIL:        (_st_prices,  "-.",             "Smooth Tail"),
-        STRAT_STATIC_MEDIAN:      (_sm_prices,  (0, (3, 1, 1, 1)), "Static Median"),
-        STRAT_ZERO:               (_zero_prices, ":",             "Zero (baseline)"),
+        STRAT_TRANSPORT_ADAPTED:  (lambda: _simulate(STRAT_TRANSPORT_ADAPTED),  "-",               "Transport-Adapted Pricing"),
+        STRAT_ONLINE_COMPETITIVE: (lambda: _simulate(STRAT_ONLINE_COMPETITIVE), "--",              "Online Competitive"),
+        STRAT_SMOOTH_TAIL:        (lambda: _simulate(STRAT_SMOOTH_TAIL),        "-.",              "Smooth Tail"),
+        STRAT_STATIC_MEDIAN:      (lambda: _simulate(STRAT_STATIC_MEDIAN),      (0, (3, 1, 1, 1)), "Static Median"),
+        STRAT_ZERO:               (lambda: _simulate(STRAT_ZERO),               ":",               "Zero (baseline)"),
     }
 
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]

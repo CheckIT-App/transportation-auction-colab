@@ -786,8 +786,12 @@ def preview_network_map(config: dict):
     center_lat = float(nodes.geometry.y.mean())
     center_lon = float(nodes.geometry.x.mean())
 
-    fmap = folium.Map(location=[center_lat, center_lon], zoom_start=15,
-                      tiles="CartoDB positron")
+    fmap = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=15,
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+    )
 
     # Draw road edges with English name tooltips
     for _, row in edges.iterrows():

@@ -746,6 +746,7 @@ def preview_network_map(config: dict):
     Call ``display(preview_network_map(config))`` in Colab to render it.
     """
     import osmnx as ox
+    import pandas as pd
     try:
         import folium
     except ImportError:
@@ -753,6 +754,10 @@ def preview_network_map(config: dict):
         return None
 
     from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
+
+    # Request English name tags when downloading graph data from OSM
+    if "name:en" not in ox.settings.useful_tags_way:
+        ox.settings.useful_tags_way = list(ox.settings.useful_tags_way) + ["name:en"]
 
     graph_file = config.get("graph_file", "har_nof.gpickle")
     place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
@@ -784,14 +789,20 @@ def preview_network_map(config: dict):
     fmap = folium.Map(location=[center_lat, center_lon], zoom_start=15,
                       tiles="OpenStreetMap")
 
-    # Draw road edges
+    # Draw road edges with English name tooltips
     for _, row in edges.iterrows():
         coords = [(lat, lon) for lon, lat in row.geometry.coords]
+
+        # Use English name only (name:en); never fall back to Hebrew default name
+        en_name = row.get("name:en")
+        road_name = str(en_name) if pd.notna(en_name) and str(en_name).strip() else ""
+
         folium.PolyLine(
             coords,
             color="#3388ff",
             weight=2.5,
             opacity=0.7,
+            tooltip=road_name if road_name else None,
         ).add_to(fmap)
 
     folium.Marker(

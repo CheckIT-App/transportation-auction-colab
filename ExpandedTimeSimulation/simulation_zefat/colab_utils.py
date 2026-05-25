@@ -786,29 +786,44 @@ def preview_network_map(config: dict):
     center_lat = float(nodes.geometry.y.mean())
     center_lon = float(nodes.geometry.x.mean())
 
+    # Label-free base map — we draw all text ourselves in English
     fmap = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=15,
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri",
+        tiles="CartoDB positron nolabels",
     )
 
-    # Draw road edges with English name tooltips
+    def _extract_en_name(row):
+        val = row.get("name:en")
+        if isinstance(val, (list, tuple)):
+            val = next((v for v in val if pd.notna(v) and str(v).strip()), None)
+        return str(val) if val is not None and pd.notna(val) and str(val).strip() else ""
+
+    # Draw road edges; collect midpoints for English labels
+    label_candidates = {}  # name -> (lat, lon) of a representative midpoint
     for _, row in edges.iterrows():
         coords = [(lat, lon) for lon, lat in row.geometry.coords]
+        folium.PolyLine(coords, color="#3388ff", weight=2.5, opacity=0.7).add_to(fmap)
 
-        # Use English name only (name:en); never fall back to Hebrew default name
-        en_name = row.get("name:en")
-        if isinstance(en_name, (list, tuple)):
-            en_name = next((v for v in en_name if pd.notna(v) and str(v).strip()), None)
-        road_name = str(en_name) if en_name is not None and pd.notna(en_name) and str(en_name).strip() else ""
+        en_name = _extract_en_name(row)
+        if en_name and en_name not in label_candidates:
+            mid = row.geometry.interpolate(0.5, normalized=True)
+            label_candidates[en_name] = (mid.y, mid.x)
 
-        folium.PolyLine(
-            coords,
-            color="#3388ff",
-            weight=2.5,
-            opacity=0.7,
-            tooltip=road_name if road_name else None,
+    # Place one English label per unique road name
+    for name, (lat, lon) in label_candidates.items():
+        folium.Marker(
+            [lat, lon],
+            icon=folium.DivIcon(
+                html=(
+                    f'<div style="font-size:9px;font-weight:bold;color:#222;'
+                    f'white-space:nowrap;'
+                    f'text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff,'
+                    f'1px -1px 0 #fff,-1px 1px 0 #fff;">{name}</div>'
+                ),
+                icon_size=(160, 20),
+                icon_anchor=(80, 10),
+            ),
         ).add_to(fmap)
 
     folium.Marker(

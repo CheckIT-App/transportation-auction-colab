@@ -795,7 +795,9 @@ def preview_network_map(config: dict):
 
         # Use English name only (name:en); never fall back to Hebrew default name
         en_name = row.get("name:en")
-        road_name = str(en_name) if pd.notna(en_name) and str(en_name).strip() else ""
+        if isinstance(en_name, (list, tuple)):
+            en_name = next((v for v in en_name if pd.notna(v) and str(v).strip()), None)
+        road_name = str(en_name) if en_name is not None and pd.notna(en_name) and str(en_name).strip() else ""
 
         folium.PolyLine(
             coords,

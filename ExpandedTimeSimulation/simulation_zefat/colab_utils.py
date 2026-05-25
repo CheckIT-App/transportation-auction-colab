@@ -787,7 +787,7 @@ def preview_network_map(config: dict):
     center_lon = float(nodes.geometry.x.mean())
 
     fmap = folium.Map(location=[center_lat, center_lon], zoom_start=15,
-                      tiles="OpenStreetMap")
+                      tiles="CartoDB positron")
 
     # Draw road edges with English name tooltips
     for _, row in edges.iterrows():

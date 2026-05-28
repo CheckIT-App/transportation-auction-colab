@@ -1863,7 +1863,7 @@ def plot_pricing_function_shapes(
     if strategies is None:
         strategies = list(ALL_STRATEGIES)
 
-    us = np.arange(bj + 1) / bj  # u = 0, 1/bj, ..., 1
+    us = np.arange(bj) / bj  # u = 0, 1/bj, ..., (bj-1)/bj
     s_max = float(bj)             # used by Online Competitive
 
     net = types.SimpleNamespace(vmax=vmax, max_time_slots=T, r=r, edge_data={})
@@ -1876,13 +1876,13 @@ def plot_pricing_function_shapes(
 
         if strat_key == STRAT_STATIC_MEDIAN:
             strat.init_price(net, 0)
-            return np.full(bj + 1, edge.unit_price())
+            return np.full(bj, edge.unit_price())
 
-        prices = [edge.unit_price()]
+        prices = []
         for _ in range(bj):
+            prices.append(edge.unit_price())  # price this vehicle pays
             edge.alloc_count += 1
             strat.update_price(net, 0, None, s_max)
-            prices.append(edge.unit_price())
         return np.array(prices)
 
     STRAT_FN = {

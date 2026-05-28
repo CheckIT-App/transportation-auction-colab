@@ -859,7 +859,7 @@ def preview_network_map_nolabels(config: dict):
     )
 
     folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+        tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
         attr="&copy; OpenStreetMap contributors &copy; CARTO",
         name="Map without labels",
         subdomains="abcd",

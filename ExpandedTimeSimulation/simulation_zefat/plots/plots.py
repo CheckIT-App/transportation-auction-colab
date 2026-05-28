@@ -1876,13 +1876,13 @@ def plot_pricing_function_shapes(
 
         if strat_key == STRAT_STATIC_MEDIAN:
             strat.init_price(net, 0)
-            return np.full(bj + 1, edge.price)
+            return np.full(bj + 1, edge.unit_price())
 
-        prices = [edge.price]
+        prices = [edge.unit_price()]
         for _ in range(bj):
             edge.alloc_count += 1
             strat.update_price(net, 0, None, s_max)
-            prices.append(edge.price)
+            prices.append(edge.unit_price())
         return np.array(prices)
 
     STRAT_FN = {
@@ -1915,7 +1915,7 @@ def plot_pricing_function_shapes(
             print(f"[plot_pricing_function_shapes] {strat_name}: {exc}")
 
     ax.set_xlabel("Utilization  u = allocations / capacity", fontsize=fs)
-    ax.set_ylabel("Edge price (toll)", fontsize=fs)
+    ax.set_ylabel("Unit price (toll / capacity)", fontsize=fs)
     ax.set_title(
         f"Pricing Function Shapes  (capacity={bj}, T={T}, travel_time={tj}, vmax={vmax})",
         fontsize=fs + 2,

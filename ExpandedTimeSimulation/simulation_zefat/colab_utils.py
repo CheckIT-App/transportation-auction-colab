@@ -746,7 +746,6 @@ def preview_network_map(config: dict):
     Call ``display(preview_network_map(config))`` in Colab to render it.
     """
     import osmnx as ox
-    import pandas as pd
     try:
         import folium
     except ImportError:
@@ -754,10 +753,6 @@ def preview_network_map(config: dict):
         return None
 
     from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
-
-    # Request English name tags when downloading graph data from OSM
-    if "name:en" not in ox.settings.useful_tags_way:
-        ox.settings.useful_tags_way = list(ox.settings.useful_tags_way) + ["name:en"]
 
     graph_file = config.get("graph_file", "har_nof.gpickle")
     place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
@@ -786,44 +781,17 @@ def preview_network_map(config: dict):
     center_lat = float(nodes.geometry.y.mean())
     center_lon = float(nodes.geometry.x.mean())
 
-    # Label-free base map — we draw all text ourselves in English
-    fmap = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=15,
-        tiles="CartoDB positron nolabels",
-    )
+    fmap = folium.Map(location=[center_lat, center_lon], zoom_start=15,
+                      tiles="OpenStreetMap")
 
-    def _extract_en_name(row):
-        val = row.get("name:en")
-        if isinstance(val, (list, tuple)):
-            val = next((v for v in val if pd.notna(v) and str(v).strip()), None)
-        return str(val) if val is not None and pd.notna(val) and str(val).strip() else ""
-
-    # Draw road edges; collect midpoints for English labels
-    label_candidates = {}  # name -> (lat, lon) of a representative midpoint
+    # Draw road edges
     for _, row in edges.iterrows():
         coords = [(lat, lon) for lon, lat in row.geometry.coords]
-        folium.PolyLine(coords, color="#3388ff", weight=2.5, opacity=0.7).add_to(fmap)
-
-        en_name = _extract_en_name(row)
-        if en_name and en_name not in label_candidates:
-            mid = row.geometry.interpolate(0.5, normalized=True)
-            label_candidates[en_name] = (mid.y, mid.x)
-
-    # Place one English label per unique road name
-    for name, (lat, lon) in label_candidates.items():
-        folium.Marker(
-            [lat, lon],
-            icon=folium.DivIcon(
-                html=(
-                    f'<div style="font-size:9px;font-weight:bold;color:#222;'
-                    f'white-space:nowrap;'
-                    f'text-shadow:1px 1px 0 #fff,-1px -1px 0 #fff,'
-                    f'1px -1px 0 #fff,-1px 1px 0 #fff;">{name}</div>'
-                ),
-                icon_size=(160, 20),
-                icon_anchor=(80, 10),
-            ),
+        folium.PolyLine(
+            coords,
+            color="#3388ff",
+            weight=2.5,
+            opacity=0.7,
         ).add_to(fmap)
 
     folium.Marker(
@@ -831,6 +799,76 @@ def preview_network_map(config: dict):
         popup=f"Network centre\n{place_name}",
         icon=folium.Icon(color="red", icon="info-sign"),
     ).add_to(fmap)
+
+    return fmap
+
+
+def preview_network_map_nolabels(config: dict):
+    """Return an interactive folium map of the road network with no text labels.
+
+    Uses a label-free CartoDB tile layer so no Hebrew (or any) place names
+    appear on the basemap — suitable for publication figures.
+    Call ``display(preview_network_map_nolabels(config))`` in Colab to render it.
+    """
+    import math
+    import osmnx as ox
+    try:
+        import folium
+    except ImportError:
+        print("folium is not installed. Run:  !pip install -q folium")
+        return None
+
+    from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
+
+    graph_file = config.get("graph_file", "har_nof.gpickle")
+    place_name = config.get("place_name", "Har Nof, Jerusalem, Israel")
+    slot_seconds = config.get("slot_seconds", 60)
+
+    loader = RealData(place_name, time_slot_duration=slot_seconds, od_count=1)
+
+    if os.path.exists(graph_file):
+        loader.load_graph_from_file(graph_file)
+    else:
+        try:
+            loader.load_graph()
+        except Exception as exc:
+            print(f"Could not load graph for map: {exc}")
+            return None
+
+    try:
+        G_latlon = ox.projection.project_graph(loader.G, to_crs="EPSG:4326")
+    except Exception:
+        G_latlon = loader.G
+
+    nodes, edges = ox.graph_to_gdfs(G_latlon)
+    center_lat = float(nodes.geometry.y.mean())
+    center_lon = float(nodes.geometry.x.mean())
+    lat_span   = float(nodes.geometry.y.max() - nodes.geometry.y.min())
+    lon_span   = float(nodes.geometry.x.max() - nodes.geometry.x.min())
+
+    span = max(lat_span, lon_span)
+    zoom = max(10, min(18, round(math.log2(360 / span)) - 1)) if span > 0 else 15
+
+    fmap = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom,
+        tiles=None,
+        control_scale=True,
+        width="100%",
+        height="100%",
+    )
+
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
+        attr="&copy; OpenStreetMap contributors &copy; CARTO",
+        name="Map without labels",
+        subdomains="abcd",
+        control=False,
+    ).add_to(fmap)
+
+    for _, row in edges.iterrows():
+        coords = [(lat, lon) for lon, lat in row.geometry.coords]
+        folium.PolyLine(coords, color="#3388ff", weight=2.5, opacity=0.7).add_to(fmap)
 
     return fmap
 

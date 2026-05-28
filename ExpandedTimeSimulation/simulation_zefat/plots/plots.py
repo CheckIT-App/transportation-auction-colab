@@ -1863,7 +1863,7 @@ def plot_pricing_function_shapes(
     if strategies is None:
         strategies = list(ALL_STRATEGIES)
 
-    us = np.arange(bj) / bj  # u = 0, 1/bj, ..., (bj-1)/bj
+    us = np.arange(1, bj + 1) / bj  # u = 1/bj, 2/bj, ..., 1
     s_max = float(bj)             # used by Online Competitive
 
     net = types.SimpleNamespace(vmax=vmax, max_time_slots=T, r=r, edge_data={})

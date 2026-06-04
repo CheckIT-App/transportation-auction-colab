@@ -152,12 +152,16 @@ class RealData:
 
         return self.od_pairs
 
-    def convert_to_base_edges(self) -> list[tuple]:
+    def convert_to_base_edges(self, demand_fraction: float | None = None) -> list[tuple]:
         """Convert the enriched OSM graph and sampled OD demand into base_edges tuples.
 
-        If edges already have a 'demand' attribute (set by enrich_graph_from_csv),
-        that value is used directly and OD-routing is skipped.
-        Otherwise demand is estimated by routing the sampled OD pairs.
+        Priority for demand value per edge:
+          1. CSV/SUMO demand pre-set by enrich_graph_from_csv  (most accurate)
+          2. OD-routing count (free-flow shortest paths)        (default when no CSV)
+          3. demand_fraction * capacity                         (fast fallback for new areas;
+                                                                 skips OD routing entirely)
+        demand_fraction: if provided, skips OD routing and sets demand = fraction * capacity
+                         for every edge that has no CSV-based demand.
         """
         if self.G is None:
             raise RuntimeError("Graph not loaded. Call load_graph() first.")
@@ -169,7 +173,7 @@ class RealData:
         )
 
         routing_demand: dict[tuple, int] = {}
-        if not has_csv_demand:
+        if not has_csv_demand and demand_fraction is None:
             # Count demand by routing each OD through the graph (free-flow travel_time)
             routing_demand = defaultdict(int)
             for o, d in self.od_pairs:
@@ -190,7 +194,12 @@ class RealData:
             secs = data.get("travel_time", 0.0)
             slots = max(1, math.ceil(secs / self.time_slot_duration))
             cap = data["capacity"]
-            dem = data.get("demand", routing_demand.get((u, v), cap))
+            if has_csv_demand:
+                dem = data.get("demand", cap)
+            elif demand_fraction is not None:
+                dem = demand_fraction * cap
+            else:
+                dem = routing_demand.get((u, v), cap)
             base_edges.append((u, v, slots, cap, dem))
 
         return base_edges

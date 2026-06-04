@@ -1298,16 +1298,16 @@ def plot_transport_adapted_update_growth(
             edge_data={0: edge},
         )
 
-        ys = [edge.price]
+        ys = []
         for _ in range(steps):
+            ys.append(edge.unit_price())  # price this vehicle pays
             edge.alloc_count += 1
             strat.update_price(net, 0, None, None)
-            ys.append(edge.price)
 
         vmax_j = vmax * (min(demand, bj) / bj)
         ci = math.log(1.0 + vmax_j) / (1.0 - 1.0 / bj)
         growth = math.exp(ci / bj)
-        return np.arange(steps + 1), np.array(ys), growth
+        return np.arange(1, steps + 1), np.array(ys), growth
 
     fig, ax = plt.subplots(figsize=(11, 6.5))
 
@@ -1317,7 +1317,7 @@ def plot_transport_adapted_update_growth(
 
     ax.set_title("Transport-Adapted Price Update Growth", fontsize=16, pad=10)
     ax.set_xlabel("Update step k (accepted units on edge)", fontsize=13)
-    ax.set_ylabel("Edge price $p_k$", fontsize=13)
+    ax.set_ylabel("Unit price $p_k / b_j$", fontsize=13)
     ax.grid(True, alpha=0.3)
     ax.tick_params(axis="both", labelsize=11)
     ax.legend(loc="upper left", fontsize=10, frameon=False)

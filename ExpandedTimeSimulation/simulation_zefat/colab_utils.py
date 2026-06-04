@@ -337,6 +337,8 @@ def run_experiment(config: dict) -> str:
         entry_fee_hi=float(config.get("entry_fee_hi", 5.0)),
         lateness_fee_lo=float(config.get("lateness_fee_lo", 1.0)),
         lateness_fee_hi=float(config.get("lateness_fee_hi", 5.0)),
+        expected_demand_file=config.get("expected_demand_file") or None,
+        demand_fraction=config.get("demand_fraction") or None,
     )
 
     # ── Build sweep ranges ───────────────────────────────────────────────────

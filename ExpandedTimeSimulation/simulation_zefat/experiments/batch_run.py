@@ -256,6 +256,8 @@ def run_batch(
     distribute_demand: bool = False,
     distribute_od_count: int = 5000,
     smooth_tail_u0: float = 0.95,
+    expected_demand_file: Optional[str] = None,
+    demand_fraction: Optional[float] = None,
     time_mode: str = "entry",
     arrival_percentage: float = 0.5,
     capacity_factor: float = 1.0,
@@ -345,7 +347,7 @@ def run_batch(
         # base edges reused for all strategies within this run
         loader.seed = base_seed + run_idx  # if your RealData uses it internally
         loader.generate_od_pairs()
-        base_edges = loader.convert_to_base_edges()
+        base_edges = loader.convert_to_base_edges(demand_fraction=demand_fraction)
 
         if capacity_factor != 1.0:
             base_edges = [
@@ -365,7 +367,9 @@ def run_batch(
                 for_demand=False,
                 capacity_is_hourly=capacity_is_hourly,
                 slot_seconds=slot_seconds,
-                node_xy_file=node_xy_file,  # NEW: gives A* coordinates in meters
+                node_xy_file=node_xy_file,
+                expected_demand_file=expected_demand_file,
+                bake_expected_demand=expected_demand_file is not None,
             )
             last_net = net
 

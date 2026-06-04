@@ -244,8 +244,7 @@ class TimeExpandedRoadNetwork:
 
         # Otherwise, retrieve the real edge data
         data = self.edge_data[edge]
-        if data.is_saturated(): 
-        #  if data.is_saturated() and not self.for_demand: #to mark
+        if data.is_saturated() and not self.for_demand:
             return float('inf')
 
         if data.price == 0:
@@ -278,8 +277,7 @@ class TimeExpandedRoadNetwork:
                 continue
             data = self.edge_data[(u, v)]
             # allow traversal beyond capacity in expected-demand runs
-            if data.alloc_count >= data.capacity: 
-            #  if data.alloc_count >= data.capacity and not self.for_demand: #to mark
+            if data.alloc_count >= data.capacity and not self.for_demand:
                 real_cost = float('inf')
                 break
             real_cost += data.unit_price()
@@ -411,7 +409,7 @@ class TimeExpandedRoadNetwork:
         for edge, data in self.edge_data.items():
             unit_price = data.unit_price()
             used_price = data.last_used_price()
-            used_unit = used_price / data.capacity if data.capacity else 0
+            used_unit = (used_price / data.capacity) + data.unit_initial_price if data.capacity else 0
             tj = data.travel_time
             ttotal = self.max_time_slots
             vmax_j = self.vmax * ((min(data.capacity, data.demand) / data.capacity) if data.capacity else 0) * (tj / ttotal)
@@ -421,7 +419,7 @@ class TimeExpandedRoadNetwork:
         plt.figure(figsize=(12, 6))
         for edge, data in self.edge_data.items():
             times = list(range(len(data.price_history)))
-            unit_history = [(p / data.capacity) if data.capacity else 0 for p in data.price_history]
+            unit_history = [(p / data.capacity) + data.unit_initial_price if data.capacity else 0 for p in data.price_history]
             label = f"{edge[0][0]}{edge[0][1]}->{edge[1][0]}{edge[1][1]}"
             plt.plot(times, unit_history, label=label)
         plt.xlabel("Round")

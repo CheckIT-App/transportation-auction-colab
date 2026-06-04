@@ -201,10 +201,13 @@ def generate_demand_preview(config: dict) -> tuple[list[dict], pd.DataFrame]:
     loader.seed = base_seed
     loader.generate_od_pairs()
 
+    reserve_lo = float(config.get("reserve_lo", 1.0))
+    reserve_hi = float(config.get("reserve_hi", 100.0))
+
     alpha_mix = mixed_alpha_sampler(
         [(0.4, (0.0, 0.3)), (0.4, (0.3, 0.7)), (0.2, (0.7, 1.0))]
     )
-    vehicles = loader.generate_vehicles(alpha=alpha_mix)
+    vehicles = loader.generate_vehicles(alpha=alpha_mix, reserve_range=(reserve_lo, reserve_hi))
     assign_peak_desired_time_by_mode(
         vehicles,
         schedule=PeakSchedule(
@@ -337,6 +340,8 @@ def run_experiment(config: dict) -> str:
         entry_fee_hi=float(config.get("entry_fee_hi", 5.0)),
         lateness_fee_lo=float(config.get("lateness_fee_lo", 1.0)),
         lateness_fee_hi=float(config.get("lateness_fee_hi", 5.0)),
+        reserve_lo=float(config.get("reserve_lo", 1.0)),
+        reserve_hi=float(config.get("reserve_hi", 100.0)),
         expected_demand_file=config.get("expected_demand_file") or None,
         demand_fraction=config.get("demand_fraction") or None,
     )

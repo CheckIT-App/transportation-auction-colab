@@ -267,6 +267,8 @@ def run_batch(
     entry_fee_hi: float = 5.0,
     lateness_fee_lo: float = 1.0,
     lateness_fee_hi: float = 5.0,
+    reserve_lo: float = 1.0,
+    reserve_hi: float = 100.0,
 ) -> None:
     """
     Runs multiple repetitions.
@@ -318,6 +320,7 @@ def run_batch(
     # 2) Generate vehicles once (copied per strategy/run)
     vehicles = loader.generate_vehicles(
         alpha=(alpha_lo, alpha_hi),
+        reserve_range=(reserve_lo, reserve_hi),
         entry_fee_range=(entry_fee_lo, entry_fee_hi),
         lateness_fee_range=(lateness_fee_lo, lateness_fee_hi),
     )

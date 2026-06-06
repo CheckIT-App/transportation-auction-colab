@@ -98,6 +98,6 @@ Virtual source/target edges contribute only delay penalties (`entry_fee` or `lat
 | `r` | Online Competitive base rate |
 | `od_count` | Number of OD pairs |
 | `slot_seconds` | Time slot duration (affects capacity scaling) |
-| `path_solver` | `dijkstra`, `bidirectional_dijkstra`, `astar_euclidean`, `astar_fflb`, etc. |
+| `path_solver` | `dijkstra`, `bidirectional_dijkstra`, `astar_euclidean`, `astar_fflb`, `astar_fflb_delay`, `astar_reverse_arrival` |
 | `smooth_tail_u0` | Transition occupancy for Smooth Tail strategy |
 | `capacity_is_hourly` | Whether to scale edge capacity to per-slot |

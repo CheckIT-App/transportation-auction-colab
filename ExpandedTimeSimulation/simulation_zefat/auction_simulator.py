@@ -180,7 +180,7 @@ class AuctionSimulator:
                     ),
                     weight=weight,
                 )
-            elif self.path_solver == "reverse_astar_ff":
+            elif self.path_solver == "astar_reverse_arrival":
                 if vehicle.get("mode") == "arrival":
                     # Arrival mode: reverse search is usually more effective.
                     self._ensure_fflb_from_source(src_phys)
@@ -190,7 +190,7 @@ class AuctionSimulator:
                         Gr,
                         self.vt,
                         self.vs,
-                        heuristic=lambda u, v: self.reverse_astar_ff_heuristic(
+                        heuristic=lambda u, v: self.astar_reverse_arrival_heuristic(
                             u, src_phys, dst_phys, vehicle["alpha"], h_cache
                         ),
                         weight=lambda u, v, d: self.network.get_cost((v, u), vehicle["alpha"], vehicle),
@@ -212,7 +212,7 @@ class AuctionSimulator:
             else:
                 raise ValueError(
                     "Unknown path_solver '{}'. Use one of: dijkstra, bidirectional_dijkstra, "
-                    "astar_euclidean, astar_fallback, astar_fflb_delay, reverse_astar_ff".format(self.path_solver)
+                    "astar_euclidean, astar_fallback, astar_fflb_delay, astar_reverse_arrival".format(self.path_solver)
                 )
             return path
         except nx.NetworkXNoPath:
@@ -303,7 +303,7 @@ class AuctionSimulator:
         cache[u] = h
         return h
 
-    def reverse_astar_ff_heuristic(self, u, src_phys, dst_phys, alpha, cache):
+    def astar_reverse_arrival_heuristic(self, u, src_phys, dst_phys, alpha, cache):
         """
         Heuristic for reversed-graph A* (searching vt -> vs).
         Lower bound is the free-flow time from source to current physical node.

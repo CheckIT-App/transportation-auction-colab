@@ -286,10 +286,16 @@ class TimeExpandedRoadNetwork:
         #    Use real_cost as a safe fallback if vehicle has no 'reserve'
         reserve = vehicle.get("reserve", real_cost)
         dijkstra_cost = vehicle.get("dijkstra_cost", real_cost)
-        success = (dijkstra_cost != float('inf') 
-                    and dijkstra_cost <= reserve
-                    and real_cost <= reserve
-                   )
+        if self.for_demand:
+            # Demand baseline: route every vehicle with a feasible path.
+            # Skip the reserve check — prices are zero and capacity is not blocking,
+            # so rejecting on travel-time budget would undercount true demand.
+            success = dijkstra_cost != float('inf')
+        else:
+            success = (dijkstra_cost != float('inf')
+                        and dijkstra_cost <= reserve
+                        and real_cost <= reserve
+                       )
         if not success:
             if real_cost == float('inf'):
                 vehicle["reject_reason"] = 1

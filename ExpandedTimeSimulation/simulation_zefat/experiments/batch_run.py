@@ -269,6 +269,8 @@ def run_batch(
     lateness_fee_hi: float = 5.0,
     reserve_lo: float = 1.0,
     reserve_hi: float = 100.0,
+    bpr_alpha: float = 0.15,
+    bpr_beta: float = 4.0,
 ) -> None:
     """
     Runs multiple repetitions.
@@ -379,6 +381,8 @@ def run_batch(
             sim = AuctionSimulator(net, copy.deepcopy(vehicles))
             sim.run()
             print("    simulation finished")
+
+            net.measure_realized_times(sim.vehicles, bpr_alpha=bpr_alpha, bpr_beta=bpr_beta)
 
             metrics = compute_metrics(sim.vehicles)
             records.append({COL_RUN: run_idx, COL_STRATEGY: strat_name, **metrics})
@@ -648,6 +652,8 @@ def run_batch_tntp(
     strategy_keys: Optional[list[str]] = None,
     run_diagnostics_plots: bool = True,
     smooth_tail_u0: float = 0.95,
+    bpr_alpha: float = 0.15,
+    bpr_beta: float = 4.0,
 ) -> None:
     """Run a batch experiment on a TNTP benchmark network.
 
@@ -711,6 +717,8 @@ def run_batch_tntp(
 
             sim = AuctionSimulator(net, copy.deepcopy(vehicles))
             sim.run()
+
+            net.measure_realized_times(sim.vehicles, bpr_alpha=bpr_alpha, bpr_beta=bpr_beta)
 
             metrics = compute_metrics(sim.vehicles)
             records.append({COL_RUN: run_idx, COL_STRATEGY: strat_name, **metrics})

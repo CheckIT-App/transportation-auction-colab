@@ -345,6 +345,54 @@ class TimeExpandedRoadNetwork:
                     # print("expected demand",data.demand, data.capacity)  # Debugging output@
         return success, real_cost
 
+    def measure_realized_times(self, vehicles, bpr_alpha=0.15, bpr_beta=4.0):
+        """Decoupled post-hoc measurement of realized travel times.
+
+        The auction allocates on free-flow estimates (unchanged). Here, once the
+        whole run is finished and every edge's `alloc_count` is final, we walk each
+        served vehicle's allocated physical path and accumulate the BPR realized
+        segment times. This captures roads that run slower than estimated even
+        while staying within strict capacity. Allocation decisions are NOT revisited.
+
+        Adds per-vehicle fields:
+          planned_travel_time   — Σ free-flow segment time (what the graph assumed)
+          actual_travel_time    — Σ BPR congested segment time (realized)
+          realized_delay        — actual_travel_time - planned_travel_time (>= 0)
+          actual_arrival        — entry_time + actual_travel_time (continuous)
+          actual_arrival_delay  — max(0, actual_arrival - desired_arrival)
+        """
+        for v in vehicles:
+            if not v.get("path_found"):
+                continue
+            path = v.get("allocated_path")
+            if not path:
+                continue
+
+            vs = ("VIRTUAL_SOURCE", path[0][1])
+            vt = ("VIRTUAL_TARGET", path[-1][1])
+
+            planned = 0.0
+            actual = 0.0
+            for u, w in zip(path, path[1:]):
+                if (u == vs) or (w == vt):
+                    continue
+                data = self.edge_data.get((u, w))
+                if data is None:
+                    continue
+                planned += data.travel_time
+                actual += data.actual_travel_time(bpr_alpha, bpr_beta)
+
+            v["planned_travel_time"] = planned
+            v["actual_travel_time"] = actual
+            v["realized_delay"] = actual - planned
+
+            entry_t = v.get("entry_time")
+            if entry_t is not None:
+                v["actual_arrival"] = entry_t + actual
+                da = v.get("desired_arrival")
+                if da is not None:
+                    v["actual_arrival_delay"] = max(0.0, (entry_t + actual) - da)
+
     def plot_base_network(self):
         G = nx.DiGraph()
         # Use base_edges for static network

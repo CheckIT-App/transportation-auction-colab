@@ -224,6 +224,10 @@ def vehicles_to_df(vehicles, run_idx, strat_name):
                 "entry_time": entry_t,
                 "exit_time": exit_t,
                 "travel_time": travel,
+                "actual_travel_time": v.get("actual_travel_time", np.nan),
+                "realized_delay": v.get("realized_delay", np.nan),
+                "actual_arrival": v.get("actual_arrival", np.nan),
+                "actual_arrival_delay": v.get("actual_arrival_delay", np.nan),
                 "entry_delay": entry_delay,
                 "arrival_delay": arrival_delay,
                 "path_len": path_len,
@@ -260,6 +264,10 @@ def edge_timeslices_to_df(edge_data_dict, run_idx, strat_name):
         util = (alloc / cap) if cap else 0.0
         over = max(0, alloc - cap) if cap else 0
 
+        free_flow_time = getattr(d, "travel_time", np.nan)
+        actual_time = d.actual_travel_time() if hasattr(d, "actual_travel_time") else free_flow_time
+        congestion_ratio = (actual_time / free_flow_time) if free_flow_time else np.nan
+
         rows.append(
             {
                 "run": run_idx,
@@ -277,6 +285,9 @@ def edge_timeslices_to_df(edge_data_dict, run_idx, strat_name):
                 "price": price,
                 "unit_initial_price": unit0,
                 "peak_price": peak,
+                "free_flow_time": free_flow_time,
+                "actual_travel_time": actual_time,
+                "congestion_ratio": congestion_ratio,
             }
         )
     return pd.DataFrame(rows)
@@ -302,6 +313,11 @@ def run_summary(veh_df: pd.DataFrame, ts_df: pd.DataFrame, run_idx, strat_name):
     sur_p50 = pct(s["surplus"], 0.5)
     sur_p90 = pct(s["surplus"], 0.9)
 
+    has_actual = ("actual_travel_time" in s.columns) and n_served
+    avg_actual_tt = float(s["actual_travel_time"].mean()) if has_actual else float("nan")
+    avg_realized_delay = float(s["realized_delay"].mean()) if has_actual else float("nan")
+    realized_delay_p90 = pct(s["realized_delay"], 0.9) if has_actual else float("nan")
+
     def gini(x: pd.Series) -> float:
         x = x.dropna().values
         if len(x) == 0:
@@ -326,6 +342,9 @@ def run_summary(veh_df: pd.DataFrame, ts_df: pd.DataFrame, run_idx, strat_name):
                 "strategy": strat_name,
                 "social_welfare": social_welfare,
                 "avg_travel_time": avg_travel_time,
+                "avg_actual_travel_time": avg_actual_tt,
+                "avg_realized_delay": avg_realized_delay,
+                "realized_delay_p90": realized_delay_p90,
                 "total_revenue": total_revenue,
                 "service_rate": svc_rate,
                 "tt_p50": tt_p50,

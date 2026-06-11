@@ -24,6 +24,21 @@ class EdgeData:
         """Check whether the edge has reached its capacity."""
         return self.alloc_count >= self.capacity
 
+    def actual_travel_time(self, bpr_alpha=0.15, bpr_beta=4.0):
+        """Realized (congested) travel time via the BPR volume-delay function.
+
+        t_actual = t_free * (1 + a * (alloc/capacity)^b)
+
+        `travel_time` stays the free-flow/planned value the auction routes on;
+        this returns the slower time actually experienced once the edge fills.
+        Computed from the final `alloc_count`, so it is a post-hoc measurement
+        and does not feed back into allocation. At zero load it equals free-flow.
+        """
+        if not self.capacity:
+            return self.travel_time
+        vc = self.alloc_count / self.capacity
+        return self.travel_time * (1.0 + bpr_alpha * (vc ** bpr_beta))
+
     def update_price(self, strategy, network, edge, vehicle, s_max):
         """Delegate price update to the active pricing strategy."""
         strategy.update_price(network, edge, vehicle, s_max)

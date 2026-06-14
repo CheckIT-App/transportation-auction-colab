@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import osmnx as ox
 
-from ExpandedTimeSimulation.simulation_zefat.auction_simulator import AuctionSimulator
+from ExpandedTimeSimulation.simulation_zefat.auction_simulator import AuctionSimulator, precompute_fflb, load_fflb
 from ExpandedTimeSimulation.simulation_zefat.network import TimeExpandedRoadNetwork
 from ExpandedTimeSimulation.simulation_zefat.plots.plots import plot_sim_diagnostics
 from ExpandedTimeSimulation.simulation_zefat.real_data import RealData
@@ -249,6 +249,8 @@ def run_batch(
     run_diagnostics_plots: bool = True,
     diagnostics_strategy: Optional[str] = STRAT_TRANSPORT_ADAPTED,
     plots_only: bool = False,
+    path_solver: str = "astar_reverse_arrival",
+    fflb_file: Optional[str] = None,
     osm_xml_file: Optional[str] = None,
     demand_csv: Optional[str] = None,
     demand_hour: int = 16,
@@ -333,7 +335,23 @@ def run_batch(
         arrival_percentage=arrival_percentage,
     )
 
-    # 3) Choose strategies
+    # 3) Load or precompute FFLB cache (used by astar_reverse_arrival / astar_fflb)
+    _fflb_path = fflb_file or (os.path.splitext(graph_file)[0] + "_fflb.pkl")
+    fflb_cache = load_fflb(_fflb_path)
+    if fflb_cache is None and path_solver in ("astar_reverse_arrival", "astar_fflb", "astar_fflb_delay"):
+        print(f"  Precomputing FFLB cache -> {_fflb_path} ...")
+        _strat_tmp = _build_strategies(["Zero"], smooth_tail_u0=smooth_tail_u0)["Zero"]
+        _net_tmp = TimeExpandedRoadNetwork(
+            loader.convert_to_base_edges(),
+            max_time_slots=max_time_slots, vmax=vmax, r=r,
+            pricing_strategy=_strat_tmp,
+            capacity_is_hourly=capacity_is_hourly,
+            slot_seconds=slot_seconds, node_xy_file=node_xy_file,
+        )
+        fflb_cache = precompute_fflb(_net_tmp, _fflb_path)
+        print(f"  FFLB ready ({len(fflb_cache['by_src'])} nodes)")
+
+    # 4) Choose strategies
     strategies = _build_strategies(strategy_keys, smooth_tail_u0=smooth_tail_u0)
 
     records: list[dict] = []
@@ -376,7 +394,8 @@ def run_batch(
             )
             last_net = net
 
-            sim = AuctionSimulator(net, copy.deepcopy(vehicles))
+            sim = AuctionSimulator(net, copy.deepcopy(vehicles),
+                                   path_solver=path_solver, fflb_cache=fflb_cache)
             sim.run()
             print("    simulation finished")
 

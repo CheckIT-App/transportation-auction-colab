@@ -1,14 +1,60 @@
 import math
+import os
+import pickle
 import networkx as nx
 import osmnx as ox
 
 from ExpandedTimeSimulation.simulation_zefat.strategies import DynamicPricingStrategy, ZeroPricingStrategy, AlternativePricingStrategy, MedianPricingStrategy
 
 
+def precompute_fflb(network, fflb_file: str, *, nodes=None) -> dict:
+    """
+    Pre-compute free-flow lower-bound shortest-path maps for all physical nodes and
+    save to *fflb_file*.  Returns the cache dict so the caller can use it immediately.
+
+    Keys: fflb["by_src"][n] = {node: travel_time}  (forward Dijkstra from n)
+          fflb["by_dst"][n] = {node: travel_time}  (reverse Dijkstra from n)
+
+    Pass nodes=<iterable> to limit computation to a subset (e.g. only OD nodes).
+    """
+    phys_fwd = nx.DiGraph()
+    phys_rev = nx.DiGraph()
+    for edge, data in network.edge_data.items():
+        u, v = edge[0][0], edge[1][0]
+        w = float(data.travel_time)
+        if phys_fwd.get_edge_data(u, v, default={}).get("weight", float("inf")) > w:
+            phys_fwd.add_edge(u, v, weight=w)
+        if phys_rev.get_edge_data(v, u, default={}).get("weight", float("inf")) > w:
+            phys_rev.add_edge(v, u, weight=w)
+
+    compute_nodes = list(nodes) if nodes is not None else list(phys_fwd.nodes())
+    by_src, by_dst = {}, {}
+    for n in compute_nodes:
+        if n in phys_fwd:
+            by_src[n] = nx.single_source_dijkstra_path_length(phys_fwd, n, weight="weight")
+        if n in phys_rev:
+            by_dst[n] = nx.single_source_dijkstra_path_length(phys_rev, n, weight="weight")
+
+    cache = {"by_src": by_src, "by_dst": by_dst}
+    os.makedirs(os.path.dirname(os.path.abspath(fflb_file)), exist_ok=True)
+    with open(fflb_file, "wb") as f:
+        pickle.dump(cache, f)
+    return cache
+
+
+def load_fflb(fflb_file: str) -> dict | None:
+    """Load a precomputed FFLB cache. Returns None if the file does not exist."""
+    if not os.path.exists(fflb_file):
+        return None
+    with open(fflb_file, "rb") as f:
+        return pickle.load(f)
+
+
 class AuctionSimulator:
     """Runs an online auction simulation by finding and allocating a path per vehicle."""
 
-    def __init__(self, network, vehicles, path_solver="bidirectional_dijkstra"):
+    def __init__(self, network, vehicles, path_solver="astar_reverse_arrival",
+                 fflb_cache: dict | None = None):
         """Initialize simulator state and prepare a reusable time-expanded graph skeleton."""
         self.strategies = {
             "Transport-Adapted": DynamicPricingStrategy(),
@@ -68,8 +114,12 @@ class AuctionSimulator:
             prev_fwd = self._physical_fwd.get_edge_data(u, v, default={}).get("weight")
             if prev_fwd is None or w < prev_fwd:
                 self._physical_fwd.add_edge(u, v, weight=w)
-        self._fflb_cache_by_dst = {}
-        self._fflb_cache_by_src = {}
+        if fflb_cache is not None:
+            self._fflb_cache_by_dst = fflb_cache.get("by_dst", {})
+            self._fflb_cache_by_src = fflb_cache.get("by_src", {})
+        else:
+            self._fflb_cache_by_dst = {}
+            self._fflb_cache_by_src = {}
 
     def run(self):
         """Process vehicles sequentially: find a path, allocate it, and record outcomes."""

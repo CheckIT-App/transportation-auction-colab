@@ -344,6 +344,9 @@ def run_experiment(config: dict) -> str:
         reserve_hi=float(config.get("reserve_hi", 100.0)),
         expected_demand_file=config.get("expected_demand_file") or None,
         demand_fraction=config.get("demand_fraction") or None,
+        verbose=bool(config.get("verbose", False)),
+        resume=bool(config.get("resume", False)),
+        big_roads_only=bool(config.get("big_roads_only", False)),
     )
 
     # ── Build sweep ranges ───────────────────────────────────────────────────

@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 import os
 import random
+import time
+import traceback as _traceback
 from typing import Optional
 
 import numpy as np
@@ -60,8 +62,10 @@ from ExpandedTimeSimulation.simulation_zefat.experiments.vehicle_generation impo
 # ---------------------------------------------------------------------------
 
 
-def analyze_edges(edges_df: pd.DataFrame) -> None:
+def analyze_edges(edges_df: pd.DataFrame, verbose: bool = False) -> None:
     """Print summary stats per strategy for edge-level metrics."""
+    if not verbose:
+        return
     if edges_df.empty:
         print("analyze_edges: edges_df is empty.")
         return
@@ -104,11 +108,13 @@ def analyze_edges(edges_df: pd.DataFrame) -> None:
                     print(f"    [{label}] n={len(subset)}, mean utilization = {subset['utilization'].mean():.3f}, total requested = {req}, total allocated = {alloc} ({pct:.1f}%)")
 
 
-def analyze_expected_demand(edges_df: pd.DataFrame) -> None:
+def analyze_expected_demand(edges_df: pd.DataFrame, verbose: bool = False) -> None:
     """
     Print expected-demand diagnostics aggregated at base-edge level.
     Expects edge to be ((u,t),(v,t2)) tuples.
     """
+    if not verbose:
+        return
     if edges_df.empty:
         print("analyze_expected_demand: edges_df is empty.")
         return
@@ -194,6 +200,78 @@ def analyze_expected_demand(edges_df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Save / load / resume helpers (CSV or Excel)
+# ---------------------------------------------------------------------------
+
+def _csv_path(base: str, sheet: str) -> str:
+    stem = base[:-4] if base.lower().endswith(".csv") else base
+    return f"{stem}_{sheet.replace(' ', '_')}.csv"
+
+
+def _save_results(base_path: str, sheets: dict, verbose: bool = False) -> None:
+    if base_path.lower().endswith(".csv"):
+        for sheet, df in sheets.items():
+            path = _csv_path(base_path, sheet)
+            df.to_csv(path, index=False)
+            if verbose:
+                print(f"  saved {path}")
+    else:
+        with pd.ExcelWriter(base_path) as writer:
+            for sheet, df in sheets.items():
+                df.to_excel(writer, sheet_name=sheet, index=False)
+        if verbose:
+            print(f"  saved {base_path}")
+
+
+def _append_run_csv(base_path: str, sheets: dict) -> None:
+    for sheet, df in sheets.items():
+        if df.empty:
+            continue
+        path = _csv_path(base_path, sheet)
+        write_header = not os.path.exists(path)
+        df.to_csv(path, mode="a", index=False, header=write_header)
+
+
+def _fmt_time(secs: float) -> str:
+    secs = max(0.0, secs)
+    h = int(secs // 3600)
+    m = int((secs % 3600) // 60)
+    s = int(secs % 60)
+    if h > 0:
+        return f"{h}h{m:02d}m{s:02d}s"
+    return f"{m}m{s:02d}s"
+
+
+def _load_completed_runs(base_path: str) -> set[int]:
+    path = _csv_path(base_path, SHEET_VEHICLE_METRICS)
+    if not os.path.exists(path):
+        return set()
+    try:
+        df = pd.read_csv(path, usecols=[COL_RUN])
+        return set(df[COL_RUN].dropna().astype(int).unique())
+    except Exception:
+        return set()
+
+
+def _warn_existing_csv(base_path: str, sheet_names: list) -> None:
+    existing = []
+    for sheet in sheet_names:
+        path = _csv_path(base_path, sheet)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    row_count = max(sum(1 for _ in f) - 1, 0)
+            except Exception:
+                row_count = -1
+            existing.append((sheet, path, row_count))
+    if existing:
+        print("WARNING: output CSV files already exist and will be APPENDED to:")
+        for sheet, path, rows in existing:
+            print(f"  {path}  ({rows} existing data rows)")
+        print("  Delete these files first if you want a clean run.")
+
+
+# ---------------------------------------------------------------------------
 # Strategy selection
 # ---------------------------------------------------------------------------
 
@@ -232,7 +310,7 @@ def _build_strategies(
 def run_batch(
     num_runs: int,
     *,
-    excel_file: str = "all_runs.xlsx",
+    excel_file: str = "all_runs.csv",
     base_seed: int = 2025,
     place_name: str = "Har Nof, Jerusalem, Israel",
     graph_file: str = "har_nof.gpickle",
@@ -271,6 +349,9 @@ def run_batch(
     lateness_fee_hi: float = 5.0,
     reserve_lo: float = 1.0,
     reserve_hi: float = 100.0,
+    verbose: bool = False,
+    resume: bool = False,
+    big_roads_only: bool = False,
 ) -> None:
     """
     Runs multiple repetitions.
@@ -286,18 +367,16 @@ def run_batch(
     """
     if plots_only:
         if not run_diagnostics_plots:
-            print("plots_only=True and run_diagnostics_plots=False; nothing to do.")
+            if verbose:
+                print("plots_only=True and run_diagnostics_plots=False; nothing to do.")
             return
         if not os.path.exists(excel_file):
             raise FileNotFoundError(
-                f"plots_only=True requires an existing Excel file, but not found: {excel_file}"
+                f"plots_only=True requires an existing file, but not found: {excel_file}"
             )
-        print(f"Plots-only mode: loading diagnostics from {excel_file}")
-        plot_sim_diagnostics(
-            excel_file,
-            horizon_T=vehicle_T,
-            fs=15,
-        )
+        if verbose:
+            print(f"Plots-only mode: loading diagnostics from {excel_file}")
+        plot_sim_diagnostics(excel_file, horizon_T=vehicle_T, fs=15)
         return
 
     if num_runs < 1:
@@ -318,6 +397,7 @@ def run_batch(
         buffer_dist=buffer_dist,
         distribute_demand=distribute_demand,
         distribute_od_count=distribute_od_count,
+        road_types=RealData.BIG_ROAD_TYPES if big_roads_only else None,
     )
     # 2) Generate vehicles once (copied per strategy/run)
     vehicles = loader.generate_vehicles(
@@ -339,7 +419,8 @@ def run_batch(
     _fflb_path = fflb_file or (os.path.splitext(graph_file)[0] + "_fflb.pkl")
     fflb_cache = load_fflb(_fflb_path)
     if fflb_cache is None and path_solver in ("astar_reverse_arrival", "astar_fflb", "astar_fflb_delay"):
-        print(f"  Precomputing FFLB cache -> {_fflb_path} ...")
+        if verbose:
+            print(f"  Precomputing FFLB cache -> {_fflb_path} ...")
         _strat_tmp = _build_strategies(["Zero"], smooth_tail_u0=smooth_tail_u0)["Zero"]
         _net_tmp = TimeExpandedRoadNetwork(
             loader.convert_to_base_edges(),
@@ -349,10 +430,29 @@ def run_batch(
             slot_seconds=slot_seconds, node_xy_file=node_xy_file,
         )
         fflb_cache = precompute_fflb(_net_tmp, _fflb_path)
-        print(f"  FFLB ready ({len(fflb_cache['by_src'])} nodes)")
+        if verbose:
+            print(f"  FFLB ready ({len(fflb_cache['by_src'])} nodes)")
 
     # 4) Choose strategies
     strategies = _build_strategies(strategy_keys, smooth_tail_u0=smooth_tail_u0)
+
+    is_csv = excel_file.lower().endswith(".csv")
+    completed_runs: set[int] = set()
+    if resume:
+        if not is_csv:
+            print("WARNING: resume only works with CSV output; ignoring.")
+        else:
+            completed_runs = _load_completed_runs(excel_file)
+            if completed_runs:
+                print(f"Resuming: {len(completed_runs)} run(s) already done {sorted(completed_runs)}, skipping them.")
+            else:
+                print("Resuming: no completed runs found, starting from scratch.")
+
+    if is_csv and not resume:
+        _warn_existing_csv(excel_file, [
+            SHEET_VEHICLE_METRICS, SHEET_EDGE_METRICS,
+            SHEET_VEHICLES_TABLE, SHEET_EDGE_TIMESLICES, SHEET_RUN_SUMMARY,
+        ])
 
     records: list[dict] = []
     all_edge_frames: list[pd.DataFrame] = []
@@ -360,113 +460,148 @@ def run_batch(
     all_timeslice_rows: list[pd.DataFrame] = []
     all_run_summaries: list[pd.DataFrame] = []
 
-    last_net = None  # for diagnostics plots that want net.edge_data
+    last_net = None
+    failed_runs: list[int] = []
+    _t0 = time.time()
 
     for run_idx in range(1, num_runs + 1):
-        print(f"\n=== BATCH RUN {run_idx}/{num_runs} ===")
+        _t_run = time.time()
 
-        # base edges reused for all strategies within this run
-        loader.seed = base_seed + run_idx  # if your RealData uses it internally
-        loader.generate_od_pairs()
-        base_edges = loader.convert_to_base_edges(demand_fraction=demand_fraction)
+        if run_idx in completed_runs:
+            print(f"[{run_idx}/{num_runs}] skipping (already completed)")
+            continue
 
-        if capacity_factor != 1.0:
-            base_edges = [
-                (u, v, t, cap * capacity_factor, demand)
-                for u, v, t, cap, demand in base_edges
-            ]
+        if verbose:
+            print(f"\n=== BATCH RUN {run_idx}/{num_runs} ===")
 
-        for strat_name, strat in strategies.items():
-            print(f"  running strategy: {strat_name}")
+        try:
+            loader.seed = base_seed + run_idx
+            loader.generate_od_pairs()
+            base_edges = loader.convert_to_base_edges(demand_fraction=demand_fraction)
 
-            net = TimeExpandedRoadNetwork(
-                base_edges,
-                max_time_slots=max_time_slots,
-                vmax=vmax,
-                r=r,
-                pricing_strategy=strat,
-                for_demand=False,
-                capacity_is_hourly=capacity_is_hourly,
-                slot_seconds=slot_seconds,
-                node_xy_file=node_xy_file,
-                expected_demand_file=expected_demand_file,
-                bake_expected_demand=expected_demand_file is not None,
-            )
-            last_net = net
+            if capacity_factor != 1.0:
+                base_edges = [
+                    (u, v, t, cap * capacity_factor, demand)
+                    for u, v, t, cap, demand in base_edges
+                ]
 
-            sim = AuctionSimulator(net, copy.deepcopy(vehicles),
-                                   path_solver=path_solver, fflb_cache=fflb_cache)
-            sim.run()
-            print("    simulation finished")
+            run_records: list[dict] = []
+            run_edge_frames: list[pd.DataFrame] = []
+            run_vehicle_rows: list[pd.DataFrame] = []
+            run_timeslice_rows: list[pd.DataFrame] = []
+            run_summaries: list[pd.DataFrame] = []
 
-            metrics = compute_metrics(sim.vehicles)
-            records.append({COL_RUN: run_idx, COL_STRATEGY: strat_name, **metrics})
+            for strat_name, strat in strategies.items():
+                if verbose:
+                    print(f"  running strategy: {strat_name}")
 
-            vdf = vehicles_to_df(sim.vehicles, run_idx, strat_name)
-            all_vehicle_rows.append(vdf)
+                net = TimeExpandedRoadNetwork(
+                    base_edges,
+                    max_time_slots=max_time_slots,
+                    vmax=vmax,
+                    r=r,
+                    pricing_strategy=strat,
+                    for_demand=False,
+                    capacity_is_hourly=capacity_is_hourly,
+                    slot_seconds=slot_seconds,
+                    node_xy_file=node_xy_file,
+                    expected_demand_file=expected_demand_file,
+                    bake_expected_demand=expected_demand_file is not None,
+                )
+                last_net = net
 
-            tsdf = edge_timeslices_to_df(net.edge_data, run_idx, strat_name)
-            all_timeslice_rows.append(tsdf)
+                sim = AuctionSimulator(net, copy.deepcopy(vehicles),
+                                       path_solver=path_solver, fflb_cache=fflb_cache)
+                sim.run()
+                if verbose:
+                    print("    simulation finished")
 
-            df_edges = collect_edge_metrics(net.edge_data, strat_name, run_idx)
-            all_edge_frames.append(df_edges)
+                metrics = compute_metrics(sim.vehicles)
+                run_records.append({COL_RUN: run_idx, COL_STRATEGY: strat_name,
+                                     "seed": base_seed + run_idx, **metrics})
 
-            run_sum = run_summary(vdf, tsdf, run_idx, strat_name)
-            all_run_summaries.append(run_sum)
+                vdf = vehicles_to_df(sim.vehicles, run_idx, strat_name)
+                run_vehicle_rows.append(vdf)
 
-    df_vehicle_metrics = pd.DataFrame(records)
-    edges_df = (
-        pd.concat(all_edge_frames, ignore_index=True)
-        if all_edge_frames
-        else pd.DataFrame()
-    )
-    df_v_table = (
-        pd.concat(all_vehicle_rows, ignore_index=True)
-        if all_vehicle_rows
-        else pd.DataFrame()
-    )
-    df_ts_table = (
-        pd.concat(all_timeslice_rows, ignore_index=True)
-        if all_timeslice_rows
-        else pd.DataFrame()
-    )
-    df_run_summ = (
-        pd.concat(all_run_summaries, ignore_index=True)
-        if all_run_summaries
-        else pd.DataFrame()
-    )
+                tsdf = edge_timeslices_to_df(net.edge_data, run_idx, strat_name)
+                run_timeslice_rows.append(tsdf)
 
-    # Optional console summaries
-    if not edges_df.empty:
-        analyze_edges(edges_df)
+                df_edges = collect_edge_metrics(net.edge_data, strat_name, run_idx)
+                run_edge_frames.append(df_edges)
 
-    # Export
-    with pd.ExcelWriter(excel_file) as writer:
-        df_vehicle_metrics.to_excel(
-            writer, sheet_name=SHEET_VEHICLE_METRICS, index=False
-        )
-        edges_df.to_excel(writer, sheet_name=SHEET_EDGE_METRICS, index=False)
-        df_v_table.to_excel(writer, sheet_name=SHEET_VEHICLES_TABLE, index=False)
-        df_ts_table.to_excel(writer, sheet_name=SHEET_EDGE_TIMESLICES, index=False)
-        df_run_summ.to_excel(writer, sheet_name=SHEET_RUN_SUMMARY, index=False)
+                run_sum = run_summary(vdf, tsdf, run_idx, strat_name)
+                run_summaries.append(run_sum)
 
-    print(f"\nDone—all results saved to {excel_file}")
+            run_vm = pd.DataFrame(run_records)
+            run_em = pd.concat(run_edge_frames, ignore_index=True) if run_edge_frames else pd.DataFrame()
+            run_vt = pd.concat(run_vehicle_rows, ignore_index=True) if run_vehicle_rows else pd.DataFrame()
+            run_ts = pd.concat(run_timeslice_rows, ignore_index=True) if run_timeslice_rows else pd.DataFrame()
+            run_rs = pd.concat(run_summaries, ignore_index=True) if run_summaries else pd.DataFrame()
+            if not run_rs.empty:
+                run_rs["seed"] = base_seed + run_idx
+
+            if is_csv:
+                _append_run_csv(excel_file, {
+                    SHEET_VEHICLE_METRICS: run_vm,
+                    SHEET_EDGE_METRICS: run_em,
+                    SHEET_VEHICLES_TABLE: run_vt,
+                    SHEET_EDGE_TIMESLICES: run_ts,
+                    SHEET_RUN_SUMMARY: run_rs,
+                })
+            else:
+                records.extend(run_records)
+                all_edge_frames.append(run_em)
+                all_vehicle_rows.append(run_vt)
+                all_timeslice_rows.append(run_ts)
+                all_run_summaries.append(run_rs)
+
+        except Exception as exc:
+            elapsed_run = time.time() - _t_run
+            print(f"[{run_idx}/{num_runs}] FAILED ({_fmt_time(elapsed_run)}): {exc} — skipping run")
+            _traceback.print_exc()
+            failed_runs.append(run_idx)
+            continue
+
+        elapsed_run = time.time() - _t_run
+        elapsed_total = time.time() - _t0
+        completed = run_idx - len(failed_runs)
+        remaining = num_runs - run_idx
+        eta = (elapsed_total / max(completed, 1)) * remaining if remaining > 0 else 0.0
+        print(f"[{run_idx}/{num_runs}] {_fmt_time(elapsed_run)} this run | {_fmt_time(elapsed_total)} elapsed | ETA {_fmt_time(eta)}")
+
+    if failed_runs:
+        print(f"WARNING: {len(failed_runs)} run(s) failed and were skipped: {failed_runs}")
+
+    if not is_csv:
+        edges_df = pd.concat(all_edge_frames, ignore_index=True) if all_edge_frames else pd.DataFrame()
+        df_v_table = pd.concat(all_vehicle_rows, ignore_index=True) if all_vehicle_rows else pd.DataFrame()
+        df_ts_table = pd.concat(all_timeslice_rows, ignore_index=True) if all_timeslice_rows else pd.DataFrame()
+        df_run_summ = pd.concat(all_run_summaries, ignore_index=True) if all_run_summaries else pd.DataFrame()
+        df_vehicle_metrics = pd.DataFrame(records)
+        analyze_edges(edges_df, verbose=verbose)
+        _save_results(excel_file, {
+            SHEET_VEHICLE_METRICS: df_vehicle_metrics,
+            SHEET_EDGE_METRICS: edges_df,
+            SHEET_VEHICLES_TABLE: df_v_table,
+            SHEET_EDGE_TIMESLICES: df_ts_table,
+            SHEET_RUN_SUMMARY: df_run_summ,
+        }, verbose=verbose)
+
+    if verbose:
+        print(f"\nDone—all results saved to {excel_file}")
 
     if run_diagnostics_plots:
         if last_net is None:
-            print("Diagnostics skipped: last_net is None.")
+            if verbose:
+                print("Diagnostics skipped: last_net is None.")
             return
-        plot_sim_diagnostics(
-            excel_file,
-            horizon_T=vehicle_T,
-            fs=15,
-        )
+        plot_sim_diagnostics(excel_file, horizon_T=vehicle_T, fs=15)
 
 
 def run_batch_for_demand(
     num_runs: int,
     *,
-    excel_file: str = "demand.xlsx",
+    excel_file: str = "demand.csv",
     base_seed: int = 2025,
     place_name: str = "Har Nof, Jerusalem, Israel",
     graph_file: str = "har_nof.gpickle",
@@ -484,6 +619,9 @@ def run_batch_for_demand(
     buffer_dist: float = 0.0,
     distribute_demand: bool = False,
     distribute_od_count: int = 5000,
+    verbose: bool = False,
+    resume: bool = False,
+    big_roads_only: bool = False,
 ) -> None:
     """
     Expected-demand baseline:
@@ -505,65 +643,112 @@ def run_batch_for_demand(
         buffer_dist=buffer_dist,
         distribute_demand=distribute_demand,
         distribute_od_count=distribute_od_count,
+        road_types=RealData.BIG_ROAD_TYPES if big_roads_only else None,
     )
     zero = make_strategy(STRAT_ZERO)
 
+    is_csv = excel_file.lower().endswith(".csv")
+    completed_runs: set[int] = set()
+    if resume:
+        if not is_csv:
+            print("WARNING: resume only works with CSV output; ignoring.")
+        else:
+            completed_runs = _load_completed_runs(excel_file)
+            if completed_runs:
+                print(f"Resuming: {len(completed_runs)} run(s) already done {sorted(completed_runs)}, skipping them.")
+            else:
+                print("Resuming: no completed runs found, starting from scratch.")
+
+    if is_csv and not resume:
+        _warn_existing_csv(excel_file, [SHEET_VEHICLE_METRICS, SHEET_EDGE_METRICS])
+
     records: list[dict] = []
     all_edge_frames: list[pd.DataFrame] = []
+    failed_runs: list[int] = []
+    _t0 = time.time()
 
     for run_idx in range(1, num_runs + 1):
-        print(f"\n=== EXPECTED-DEMAND RUN {run_idx}/{num_runs} ===")
+        _t_run = time.time()
 
-        loader.seed = base_seed + run_idx
-        loader.generate_od_pairs()
-        base_edges = loader.convert_to_base_edges()
+        if run_idx in completed_runs:
+            print(f"[{run_idx}/{num_runs}] skipping (already completed)")
+            continue
 
-        net = TimeExpandedRoadNetwork(
-            base_edges,
-            max_time_slots=max_time_slots,
-            vmax=vmax,
-            r=r,
-            pricing_strategy=zero,
-            for_demand=True,
-            slot_seconds=slot_seconds,
-            node_xy_file=node_xy_file,  # NEW
-        )
+        if verbose:
+            print(f"\n=== EXPECTED-DEMAND RUN {run_idx}/{num_runs} ===")
 
-        vehicles = loader.generate_vehicles()
-        assign_peak_desired_entry(
-            vehicles,
-            schedule=PeakSchedule(
-                peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
-            ),
-            write_arrival=True,
-        )
-        sim = AuctionSimulator(net, copy.deepcopy(vehicles))
-        sim.run()
-        print("    simulation finished")
+        try:
+            loader.seed = base_seed + run_idx
+            loader.generate_od_pairs()
+            base_edges = loader.convert_to_base_edges()
 
-        metrics = compute_metrics(sim.vehicles)
-        records.append({COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO, **metrics})
+            net = TimeExpandedRoadNetwork(
+                base_edges,
+                max_time_slots=max_time_slots,
+                vmax=vmax,
+                r=r,
+                pricing_strategy=zero,
+                for_demand=True,
+                slot_seconds=slot_seconds,
+                node_xy_file=node_xy_file,
+            )
 
-        df_edges = collect_edge_metrics(net.edge_data, STRAT_ZERO, run_idx)
-        all_edge_frames.append(df_edges)
+            vehicles = loader.generate_vehicles()
+            assign_peak_desired_entry(
+                vehicles,
+                schedule=PeakSchedule(
+                    peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
+                ),
+                write_arrival=True,
+            )
+            sim = AuctionSimulator(net, copy.deepcopy(vehicles))
+            sim.run()
+            if verbose:
+                print("    simulation finished")
 
-    df_vehicle_metrics = pd.DataFrame(records)
-    edges_df = (
-        pd.concat(all_edge_frames, ignore_index=True)
-        if all_edge_frames
-        else pd.DataFrame()
-    )
+            metrics = compute_metrics(sim.vehicles)
+            run_vm = pd.DataFrame([{COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO,
+                                     "seed": base_seed + run_idx, **metrics}])
+            run_em = collect_edge_metrics(net.edge_data, STRAT_ZERO, run_idx)
 
-    if not edges_df.empty:
-        analyze_edges(edges_df)
+            if is_csv:
+                _append_run_csv(excel_file, {
+                    SHEET_VEHICLE_METRICS: run_vm,
+                    SHEET_EDGE_METRICS: run_em,
+                })
+            else:
+                records.append({COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO,
+                                 "seed": base_seed + run_idx, **metrics})
+                all_edge_frames.append(run_em)
 
-    with pd.ExcelWriter(excel_file) as writer:
-        df_vehicle_metrics.to_excel(
-            writer, sheet_name=SHEET_VEHICLE_METRICS, index=False
-        )
-        edges_df.to_excel(writer, sheet_name=SHEET_EDGE_METRICS, index=False)
+        except Exception as exc:
+            elapsed_run = time.time() - _t_run
+            print(f"[{run_idx}/{num_runs}] FAILED ({_fmt_time(elapsed_run)}): {exc} — skipping run")
+            _traceback.print_exc()
+            failed_runs.append(run_idx)
+            continue
 
-    print(f"\nDone—expected-demand baseline built; results saved to {excel_file}")
+        elapsed_run = time.time() - _t_run
+        elapsed_total = time.time() - _t0
+        completed = run_idx - len(failed_runs)
+        remaining = num_runs - run_idx
+        eta = (elapsed_total / max(completed, 1)) * remaining if remaining > 0 else 0.0
+        print(f"[{run_idx}/{num_runs}] {_fmt_time(elapsed_run)} this run | {_fmt_time(elapsed_total)} elapsed | ETA {_fmt_time(eta)}")
+
+    if failed_runs:
+        print(f"WARNING: {len(failed_runs)} run(s) failed and were skipped: {failed_runs}")
+
+    if not is_csv:
+        df_vehicle_metrics = pd.DataFrame(records)
+        edges_df = pd.concat(all_edge_frames, ignore_index=True) if all_edge_frames else pd.DataFrame()
+        analyze_edges(edges_df, verbose=verbose)
+        _save_results(excel_file, {
+            SHEET_VEHICLE_METRICS: df_vehicle_metrics,
+            SHEET_EDGE_METRICS: edges_df,
+        }, verbose=verbose)
+
+    if verbose:
+        print(f"\nDone—expected-demand baseline built; results saved to {excel_file}")
 
 
 def _load_or_build_graph_and_xy(
@@ -580,6 +765,7 @@ def _load_or_build_graph_and_xy(
     buffer_dist: float = 0.0,
     distribute_demand: bool = False,
     distribute_od_count: int = 5000,
+    road_types: Optional[frozenset] = None,
 ) -> tuple[RealData, str]:
     """
     Returns:
@@ -620,7 +806,7 @@ def _load_or_build_graph_and_xy(
         loader.load_graph_from_osm_xml(osm_xml_file)
     else:
         # Download + project to meters (optionally with buffer around place boundary)
-        loader.load_graph(buffer_dist=buffer_dist)
+        loader.load_graph(buffer_dist=buffer_dist, road_types=road_types)
 
     # Enrich edges with capacity, speed, travel_time (and optionally real demand)
     if demand_csv is not None and os.path.exists(demand_csv):

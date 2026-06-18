@@ -78,9 +78,6 @@ class AuctionSimulator:
         self.G.add_node(self.vs)
         self.G.add_node(self.vt)
         # self.G = ox.project_graph(self.G)
-        print("crs in graph:", self.G.graph.get("crs"))
-        n, d = next(iter(self.G.nodes(data=True)))
-        print("sample node attrs keys:", list(d.keys())[:20])
         self.vmax_mps = 40.0  # For heuristic scaling in A* (meters per second)
         pos_xy = {}
         for node, data in self.G.nodes(data=True):

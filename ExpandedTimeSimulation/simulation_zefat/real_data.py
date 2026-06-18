@@ -32,13 +32,23 @@ class RealData:
         self.od_pairs: list[tuple] = []
         self.vehicles: list[dict] = []
 
-    def load_graph(self, buffer_dist: float = 0.0) -> nx.MultiDiGraph:
+    # Road types considered "big roads" for OSM filtering
+    BIG_ROAD_TYPES: frozenset[str] = frozenset({
+        "motorway", "motorway_link",
+        "trunk", "trunk_link",
+        "primary", "primary_link",
+        "secondary", "secondary_link",
+    })
+
+    def load_graph(self, buffer_dist: float = 0.0, road_types: Optional[frozenset] = None) -> nx.MultiDiGraph:
         """Download the OSM graph for the specified place and network type.
 
         Args:
             buffer_dist: extra meters to expand beyond the place polygon boundary.
                          0 = strict boundary (default). Use e.g. 600 to include
                          surrounding access roads.
+            road_types:  if given, only edges with a matching 'highway' tag are kept.
+                         Pass RealData.BIG_ROAD_TYPES to restrict to major roads only.
         """
         if buffer_dist > 0:
             self.G = ox.graph_from_place(
@@ -49,7 +59,23 @@ class RealData:
         else:
             self.G = ox.graph_from_place(self.place_name, network_type=self.network_type)
         self.G = ox.project_graph(self.G)
+        if road_types:
+            self.filter_to_road_types(road_types)
         return self.G
+
+    def filter_to_road_types(self, road_types: frozenset) -> None:
+        """Remove edges whose 'highway' tag is not in road_types, then drop isolated nodes."""
+        if self.G is None:
+            raise RuntimeError("Graph not loaded.")
+        to_remove = []
+        for u, v, k, data in self.G.edges(keys=True, data=True):
+            hw = data.get("highway", "")
+            tags = hw if isinstance(hw, list) else [hw]
+            if not any(t in road_types for t in tags):
+                to_remove.append((u, v, k))
+        self.G.remove_edges_from(to_remove)
+        isolated = list(nx.isolates(self.G))
+        self.G.remove_nodes_from(isolated)
 
     @staticmethod
     def extract_lanes(lanes_raw) -> int:

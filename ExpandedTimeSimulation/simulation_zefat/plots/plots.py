@@ -1,6 +1,7 @@
 import ast
 import math
 import itertools
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -60,6 +61,20 @@ def _require_cols(df: pd.DataFrame, cols: list[str], where: str) -> None:
 
 
 def _read_sheets(excel_file: str) -> dict[str, pd.DataFrame]:
+    """Load result sheets from either an Excel file or per-sheet CSV files."""
+    if excel_file.lower().endswith(".csv"):
+        from ExpandedTimeSimulation.simulation_zefat.constants import (
+            SHEET_VEHICLE_METRICS, SHEET_EDGE_METRICS, SHEET_VEHICLES_TABLE,
+            SHEET_EDGE_TIMESLICES, SHEET_RUN_SUMMARY,
+        )
+        stem = excel_file[:-4]
+        out: dict[str, pd.DataFrame] = {}
+        for name in [SHEET_VEHICLE_METRICS, SHEET_EDGE_METRICS, SHEET_VEHICLES_TABLE,
+                     SHEET_EDGE_TIMESLICES, SHEET_RUN_SUMMARY]:
+            path = f"{stem}_{name.replace(' ', '_')}.csv"
+            if os.path.exists(path):
+                out[name] = pd.read_csv(path)
+        return out
     xls = pd.ExcelFile(excel_file)
     out: dict[str, pd.DataFrame] = {}
     for name in xls.sheet_names:

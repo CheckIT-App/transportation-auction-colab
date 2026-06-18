@@ -458,11 +458,19 @@ def run_experiment(config: dict) -> str:
         except OSError:
             pass
 
-    with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
+    if excel_file.lower().endswith(".csv"):
+        stem = excel_file[:-4]
         for sheet in sheet_names:
             frames = merged[sheet]
             if frames:
-                pd.concat(frames, ignore_index=True).to_excel(writer, sheet_name=sheet, index=False)
+                path = f"{stem}_{sheet.replace(' ', '_')}.csv"
+                pd.concat(frames, ignore_index=True).to_csv(path, index=False)
+    else:
+        with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
+            for sheet in sheet_names:
+                frames = merged[sheet]
+                if frames:
+                    pd.concat(frames, ignore_index=True).to_excel(writer, sheet_name=sheet, index=False)
 
     print(f"\nSweep complete. Results saved to: {excel_file}")
     return excel_file
@@ -521,7 +529,12 @@ def plot_custom(
     )
 
     try:
-        vt = pd.read_excel(excel_file, sheet_name=SHEET_VEHICLES_TABLE)
+        if excel_file.lower().endswith(".csv"):
+            stem = excel_file[:-4]
+            path = f"{stem}_{SHEET_VEHICLES_TABLE.replace(' ', '_')}.csv"
+            vt = pd.read_csv(path)
+        else:
+            vt = pd.read_excel(excel_file, sheet_name=SHEET_VEHICLES_TABLE)
     except Exception as exc:
         print(f"Could not read '{excel_file}': {exc}")
         return
@@ -659,7 +672,7 @@ def plot_custom(
 
 
 def summarize_results(excel_file: str) -> dict[str, pd.DataFrame]:
-    """Read all result sheets from the Excel file. Returns a dict keyed by sheet name."""
+    """Read all result sheets from either an Excel file or per-sheet CSV files."""
     from ExpandedTimeSimulation.simulation_zefat.constants import (
         SHEET_EDGE_METRICS,
         SHEET_EDGE_TIMESLICES,
@@ -676,12 +689,24 @@ def summarize_results(excel_file: str) -> dict[str, pd.DataFrame]:
         SHEET_RUN_SUMMARY,
     ]
     sheets: dict[str, pd.DataFrame] = {}
-    for name in sheet_names:
-        try:
-            sheets[name] = pd.read_excel(excel_file, sheet_name=name)
-        except Exception as exc:
-            print(f"Warning: could not read sheet '{name}': {exc}")
-            sheets[name] = pd.DataFrame()
+
+    if excel_file.lower().endswith(".csv"):
+        stem = excel_file[:-4]
+        for name in sheet_names:
+            path = f"{stem}_{name.replace(' ', '_')}.csv"
+            try:
+                sheets[name] = pd.read_csv(path)
+            except Exception as exc:
+                print(f"Warning: could not read '{path}': {exc}")
+                sheets[name] = pd.DataFrame()
+    else:
+        for name in sheet_names:
+            try:
+                sheets[name] = pd.read_excel(excel_file, sheet_name=name)
+            except Exception as exc:
+                print(f"Warning: could not read sheet '{name}': {exc}")
+                sheets[name] = pd.DataFrame()
+
     return sheets
 
 

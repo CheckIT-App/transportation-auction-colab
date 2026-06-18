@@ -518,7 +518,8 @@ def run_batch(
 
                 metrics = compute_metrics(sim.vehicles)
                 run_records.append({COL_RUN: run_idx, COL_STRATEGY: strat_name,
-                                     "seed": base_seed + run_idx, **metrics})
+                                     "seed": base_seed + run_idx,
+                                     "place": place_name, **metrics})
 
                 vdf = vehicles_to_df(sim.vehicles, run_idx, strat_name)
                 run_vehicle_rows.append(vdf)
@@ -539,6 +540,9 @@ def run_batch(
             run_rs = pd.concat(run_summaries, ignore_index=True) if run_summaries else pd.DataFrame()
             if not run_rs.empty:
                 run_rs["seed"] = base_seed + run_idx
+            for _df in [run_em, run_vt, run_ts, run_rs]:
+                if not _df.empty:
+                    _df["place"] = place_name
 
             if is_csv:
                 _append_run_csv(excel_file, {
@@ -708,8 +712,11 @@ def run_batch_for_demand(
 
             metrics = compute_metrics(sim.vehicles)
             run_vm = pd.DataFrame([{COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO,
-                                     "seed": base_seed + run_idx, **metrics}])
+                                     "seed": base_seed + run_idx,
+                                     "place": place_name, **metrics}])
             run_em = collect_edge_metrics(net.edge_data, STRAT_ZERO, run_idx)
+            if not run_em.empty:
+                run_em["place"] = place_name
 
             if is_csv:
                 _append_run_csv(excel_file, {
@@ -718,7 +725,8 @@ def run_batch_for_demand(
                 })
             else:
                 records.append({COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO,
-                                 "seed": base_seed + run_idx, **metrics})
+                                 "seed": base_seed + run_idx,
+                                 "place": place_name, **metrics})
                 all_edge_frames.append(run_em)
 
         except Exception as exc:

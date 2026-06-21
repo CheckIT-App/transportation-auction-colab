@@ -11,13 +11,16 @@ Academic research project simulating and comparing online auction mechanisms for
 ### Interactive (Google Colab notebook)
 Open `Transportation_Auction_Simulation.ipynb` and run cells B–F sequentially for a full experiment. Sections G–I provide analysis and visualization.
 
-### Command-Line (C:\Transportation_vmax_per_segment)
+### Command-Line (run from `c:\Users\חוה\Documents\transportation-auction-colab`)
 ```powershell
 # Batch run all strategies, export to Excel
 python -m ExpandedTimeSimulation.simulation_zefat.experiments.cli batch --runs 3 --excel results.xlsx
 
 # Expected-demand baseline (capacity doesn't block routing)
 python -m ExpandedTimeSimulation.simulation_zefat.experiments.cli demand --runs 5 --excel demand.xlsx
+
+# Expected-demand baseline with compact Parquet output (for upload to Colab)
+python -m ExpandedTimeSimulation.simulation_zefat.experiments.cli demand --runs 3 --excel demand.csv --parquet ashdod_demand.parquet --graph ashdod.gpickle
 
 # TNTP benchmark network
 python -m ExpandedTimeSimulation.simulation_zefat.experiments.cli tntp --dir tntp_networks --network SiouxFalls
@@ -31,14 +34,17 @@ python ExpandedTimeSimulation/simulation_zefat/main.py
 
 ### Dependencies
 ```powershell
-pip install networkx osmnx pandas numpy matplotlib folium openpyxl
+pip install networkx osmnx pandas numpy matplotlib folium openpyxl pyarrow
 ```
 
 ## Architecture
 
-architecture:
-- `c:\Users\חוה\Documents\transportation-auction-colab` — Jupyter/Colab notebook version (this repo)
-- 
+### Repositories
+- **`c:\Users\חוה\Documents\transportation-auction-colab`** — THIS repo. All code edits go here. Contains the Jupyter/Colab notebook (`Transportation_Auction_Simulation.ipynb`) and the full `ExpandedTimeSimulation/` package.
+- **`c:\Transportation_vmax_per_segment`** — Local working directory for running CLI experiments and storing large result files (`.xlsx`, `.gpickle`, `.pkl`). Has its own copy of `ExpandedTimeSimulation/` that must be kept in sync manually when making code changes.
+
+> **IMPORTANT for Claude:** Always edit files under `c:\Users\חוה\Documents\transportation-auction-colab\ExpandedTimeSimulation\`. Do NOT edit `c:\Transportation_vmax_per_segment\ExpandedTimeSimulation\` unless explicitly asked.
+
 ### Core Data Flow
 
 ```

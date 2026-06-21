@@ -606,6 +606,7 @@ def run_batch_for_demand(
     num_runs: int,
     *,
     excel_file: str = "demand.csv",
+    parquet_file: Optional[str] = None,
     base_seed: int = 2025,
     place_name: str = "Har Nof, Jerusalem, Israel",
     graph_file: str = "har_nof.gpickle",
@@ -668,6 +669,8 @@ def run_batch_for_demand(
 
     records: list[dict] = []
     all_edge_frames: list[pd.DataFrame] = []
+    all_ts_frames: list[pd.DataFrame] = []
+    all_veh_frames: list[pd.DataFrame] = []
     failed_runs: list[int] = []
     _t0 = time.time()
 
@@ -717,17 +720,29 @@ def run_batch_for_demand(
             run_em = collect_edge_metrics(net.edge_data, STRAT_ZERO, run_idx)
             if not run_em.empty:
                 run_em["place"] = place_name
+            run_ts = edge_timeslices_to_df(net.edge_data, run_idx, STRAT_ZERO)
+            run_vt = vehicles_to_df(sim.vehicles, run_idx, STRAT_ZERO)
 
             if is_csv:
                 _append_run_csv(excel_file, {
                     SHEET_VEHICLE_METRICS: run_vm,
                     SHEET_EDGE_METRICS: run_em,
+                    SHEET_EDGE_TIMESLICES: run_ts,
+                    SHEET_VEHICLES_TABLE: run_vt,
                 })
             else:
                 records.append({COL_RUN: run_idx, COL_STRATEGY: STRAT_ZERO,
                                  "seed": base_seed + run_idx,
                                  "place": place_name, **metrics})
                 all_edge_frames.append(run_em)
+                all_ts_frames.append(run_ts)
+                all_veh_frames.append(run_vt)
+
+            # Always accumulate for Parquet even in CSV-streaming mode
+            if parquet_file is not None and is_csv:
+                all_edge_frames.append(run_em)
+                all_ts_frames.append(run_ts)
+                all_veh_frames.append(run_vt)
 
         except Exception as exc:
             elapsed_run = time.time() - _t_run
@@ -749,11 +764,34 @@ def run_batch_for_demand(
     if not is_csv:
         df_vehicle_metrics = pd.DataFrame(records)
         edges_df = pd.concat(all_edge_frames, ignore_index=True) if all_edge_frames else pd.DataFrame()
+        ts_df = pd.concat(all_ts_frames, ignore_index=True) if all_ts_frames else pd.DataFrame()
+        veh_df = pd.concat(all_veh_frames, ignore_index=True) if all_veh_frames else pd.DataFrame()
         analyze_edges(edges_df, verbose=verbose)
         _save_results(excel_file, {
             SHEET_VEHICLE_METRICS: df_vehicle_metrics,
             SHEET_EDGE_METRICS: edges_df,
+            SHEET_EDGE_TIMESLICES: ts_df,
+            SHEET_VEHICLES_TABLE: veh_df,
         }, verbose=verbose)
+
+    if parquet_file is not None:
+        edges_df_pq = pd.concat(all_edge_frames, ignore_index=True) if all_edge_frames else pd.DataFrame()
+        ts_df_pq    = pd.concat(all_ts_frames,   ignore_index=True) if all_ts_frames   else pd.DataFrame()
+        veh_df_pq   = pd.concat(all_veh_frames,  ignore_index=True) if all_veh_frames  else pd.DataFrame()
+        if not edges_df_pq.empty:
+            _pq_stem = parquet_file.replace(".parquet", "").replace(".pq", "")
+            _save_parquet = {
+                f"{_pq_stem}_edge_metrics.parquet":     edges_df_pq[["run", "strategy", "edge", "alloc_count", "capacity", "demand", "utilization"]],
+                f"{_pq_stem}_edge_timeslices.parquet":  ts_df_pq[["run", "strategy", "edge", "t", "alloc_count", "util", "capacity"]] if not ts_df_pq.empty else ts_df_pq,
+                f"{_pq_stem}_vehicles_table.parquet":   veh_df_pq if not veh_df_pq.empty else veh_df_pq,
+            }
+            for path, df_out in _save_parquet.items():
+                if not df_out.empty:
+                    df_out.to_parquet(path, index=False)
+                    size_mb = os.path.getsize(path) / 1_048_576
+                    print(f"  Parquet → {os.path.basename(path)}  ({size_mb:.1f} MB)")
+        else:
+            print("WARNING: no edge data collected — Parquet files not written.")
 
     if verbose:
         print(f"\nDone—expected-demand baseline built; results saved to {excel_file}")

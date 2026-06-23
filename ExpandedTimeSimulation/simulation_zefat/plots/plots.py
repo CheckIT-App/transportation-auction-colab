@@ -1499,6 +1499,8 @@ def plot_requests_heatmap(ts_tbl: pd.DataFrame, *, top_n: int = 20, fs: int = 11
         print("plot_requests_heatmap: missing data, skipping.")
         return
 
+    ts_tbl = ts_tbl.copy()
+    ts_tbl["edge"] = ts_tbl["edge"].astype(str)
     strategies = ts_tbl[COL_STRATEGY].unique()
 
     # Identify top-N edges by total request_count (shared across strategies for comparability)
@@ -1621,6 +1623,7 @@ def plot_demand_over_time(
 
     top_n = top_n_edges or 10
     df = ts_df.copy()
+    df["edge"] = df["edge"].astype(str)
     df[metric] = pd.to_numeric(df[metric], errors="coerce").fillna(0)
     df[COL_T] = pd.to_numeric(df[COL_T], errors="coerce")
     df = df.dropna(subset=[COL_T])

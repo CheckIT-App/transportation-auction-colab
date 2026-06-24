@@ -271,6 +271,14 @@ def _warn_existing_csv(base_path: str, sheet_names: list) -> None:
         print("  Delete these files first if you want a clean run.")
 
 
+def _clear_existing_csv(base_path: str, sheet_names: list) -> None:
+    for sheet in sheet_names:
+        path = _csv_path(base_path, sheet)
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Cleared existing file: {path}")
+
+
 # ---------------------------------------------------------------------------
 # Strategy selection
 # ---------------------------------------------------------------------------
@@ -449,7 +457,7 @@ def run_batch(
                 print("Resuming: no completed runs found, starting from scratch.")
 
     if is_csv and not resume:
-        _warn_existing_csv(excel_file, [
+        _clear_existing_csv(excel_file, [
             SHEET_VEHICLE_METRICS, SHEET_EDGE_METRICS,
             SHEET_VEHICLES_TABLE, SHEET_EDGE_TIMESLICES, SHEET_RUN_SUMMARY,
         ])

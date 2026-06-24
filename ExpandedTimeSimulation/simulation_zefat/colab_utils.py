@@ -697,8 +697,15 @@ def summarize_results(excel_file: str) -> dict[str, pd.DataFrame]:
             try:
                 sheets[name] = pd.read_csv(path)
             except Exception as exc:
-                print(f"Warning: could not read '{path}': {exc}")
-                sheets[name] = pd.DataFrame()
+                # File may have mixed column counts from appended runs with different schemas.
+                # Fall back to skipping malformed rows so the rest of the data is readable.
+                try:
+                    sheets[name] = pd.read_csv(path, on_bad_lines="skip", engine="python")
+                    print(f"Warning: '{path}' had inconsistent columns — some rows were skipped. "
+                          f"Delete the file and re-run F1 to get clean data.")
+                except Exception:
+                    print(f"Warning: could not read '{path}': {exc}")
+                    sheets[name] = pd.DataFrame()
     else:
         for name in sheet_names:
             try:

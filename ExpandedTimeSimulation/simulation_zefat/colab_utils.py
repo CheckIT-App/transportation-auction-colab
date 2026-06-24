@@ -310,7 +310,15 @@ def run_experiment(config: dict) -> str:
 
     from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import run_batch
 
-    excel_file = config.get("excel_file", "results.xlsx")
+    _base_file = config.get("excel_file", "results.xlsx")
+    _ext       = ".csv" if _base_file.lower().endswith(".csv") else ".xlsx"
+    _out_dir   = os.path.dirname(_base_file) or "."
+    _graph_stem = os.path.splitext(os.path.basename(config.get("graph_file", "network.gpickle")))[0]
+    _od_start  = int(config.get("od_count_start", config.get("od_count", 200)))
+    _od_end    = int(config.get("od_count_end",   _od_start))
+    _n_str     = f"{_od_start}veh" if _od_start == _od_end else f"{_od_start}-{_od_end}veh"
+    excel_file = os.path.join(_out_dir, f"{_graph_stem}_{_n_str}_results{_ext}")
+    print(f"Output → {excel_file}")
 
     strategy_keys = config.get("strategy_keys")
     if strategy_keys is not None:

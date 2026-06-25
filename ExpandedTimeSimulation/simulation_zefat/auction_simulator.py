@@ -256,10 +256,24 @@ class AuctionSimulator:
                         ),
                         weight=weight,
                     )
+            elif self.path_solver == "reverse_dijkstra":
+                if vehicle.get("mode") == "arrival":
+                    # Arrival mode: reverse the graph and run Dijkstra from vt -> vs.
+                    Gr = self.G.reverse(copy=False)
+                    rev_path = nx.dijkstra_path(
+                        Gr,
+                        self.vt,
+                        self.vs,
+                        weight=lambda u, v, d: self.network.get_cost((v, u), vehicle["alpha"], vehicle),
+                    )
+                    path = list(reversed(rev_path))
+                else:
+                    # Entry mode: plain forward Dijkstra.
+                    path = nx.dijkstra_path(self.G, self.vs, self.vt, weight=weight)
             else:
                 raise ValueError(
                     "Unknown path_solver '{}'. Use one of: dijkstra, bidirectional_dijkstra, "
-                    "astar_euclidean, astar_fallback, astar_fflb_delay, astar_reverse_arrival".format(self.path_solver)
+                    "astar_euclidean, astar_fflb, astar_fflb_delay, astar_reverse_arrival, reverse_dijkstra".format(self.path_solver)
                 )
             return path
         except nx.NetworkXNoPath:

@@ -118,7 +118,7 @@ class AuctionSimulator:
             self._fflb_cache_by_dst = {}
             self._fflb_cache_by_src = {}
 
-    def run(self):
+    def run(self, verbose=True):
         """Process vehicles sequentially: find a path, allocate it, and record outcomes."""
         for idx, v in enumerate(self.vehicles):
             # print(f"Vehicle {idx}")
@@ -156,7 +156,8 @@ class AuctionSimulator:
             # print(f"Vehicle {v['source']} -> {v['destination']} ")
 
         self.network.print_vehicle_info(self.vehicles)
-        self.report_objectives()
+        if verbose:
+            self.report_objectives()
 
     def find_path_for_vehicle(self, vehicle):
         """Find a feasible (time-consistent) path by adding temporary virtual entry/exit edges."""
@@ -212,7 +213,7 @@ class AuctionSimulator:
                     self.G,
                     self.vs,
                     self.vt,
-                    heuristic=lambda u, v: self.astar_fflb_heuristic(u, src_phys, dst_phys, vehicle["alpha"]),
+                    heuristic=lambda u, v: self.astar_fallback_heuristic(u, src_phys, dst_phys, vehicle["alpha"]),
                     weight=weight,
                 )
             elif self.path_solver == "astar_fflb_delay":

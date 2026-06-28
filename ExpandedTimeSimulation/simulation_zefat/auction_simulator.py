@@ -245,15 +245,15 @@ class AuctionSimulator:
                     )
                     path = list(reversed(rev_path))
                 else:
-                    # Enter mode: use the regular forward graph heuristic.
+                    # Entry mode: simple FFLB forward heuristic — no lateness term needed.
                     self._ensure_fflb_for_destination(dst_phys)
                     h_cache = {}
                     path = nx.astar_path(
                         self.G,
                         self.vs,
                         self.vt,
-                        heuristic=lambda u, v: self.astar_fflb_delay_heuristic(
-                            u, src_phys, dst_phys, vehicle, h_cache
+                        heuristic=lambda u, v: self.astar_fallback_heuristic(
+                            u, src_phys, dst_phys, vehicle["alpha"]
                         ),
                         weight=weight,
                     )

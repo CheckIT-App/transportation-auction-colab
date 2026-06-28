@@ -159,6 +159,11 @@ class TimeExpandedRoadNetwork:
                 hit += 1
         return hit
 
+    def reset(self):
+        """Reset all edge mutable state so the network can be reused without reloading."""
+        for data in self.edge_data.values():
+            data.reset()
+
     def build_time_expanded_graph(self, base_edges):
         for u, v, time_to_travel, capacity_in, demand in base_edges:
             # correct per-slot capacity scaling

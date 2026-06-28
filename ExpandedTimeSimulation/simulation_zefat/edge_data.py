@@ -35,3 +35,10 @@ class EdgeData:
     def last_used_price(self):
         """Return the previous price value (before the most recent update)."""
         return self.price_history[-2] if len(self.price_history) > 1 else 0.0
+
+    def reset(self):
+        """Restore mutable simulation state to initial values (reuse without rebuilding)."""
+        self.price = self.unit_initial_price * self.capacity
+        self.price_history = [self.price]
+        self.alloc_count = 0
+        self.request_count = 0

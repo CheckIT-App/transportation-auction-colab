@@ -479,7 +479,7 @@ def series_accept_reject_breakdown(
 
     rej = df[(df[COL_SERVED] == False) & df[key].notna()]
     rejc = rej[rej[COL_REJECT_REASON] == 1]
-    rejv = rej  # keep original behavior: all rejects also counted as "valuation" bucket
+    rejv = rej[rej[COL_REJECT_REASON] != 1]  # valuation = rejected but not capacity-blocked
 
     for t, cnt in rejc.groupby(key).size().items():
         ti = int(t)

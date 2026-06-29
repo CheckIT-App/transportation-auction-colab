@@ -682,6 +682,21 @@ def run_batch_for_demand(
     failed_runs: list[int] = []
     _t0 = time.time()
 
+    # When resuming with CSV streaming + parquet output, pre-load already-completed data
+    # so the final parquet contains all runs, not just the newly processed ones.
+    if resume and is_csv and parquet_file is not None and completed_runs:
+        for _sheet, _frames in [
+            (SHEET_EDGE_METRICS, all_edge_frames),
+            (SHEET_EDGE_TIMESLICES, all_ts_frames),
+            (SHEET_VEHICLES_TABLE, all_veh_frames),
+        ]:
+            _path = _csv_path(excel_file, _sheet)
+            if os.path.exists(_path):
+                try:
+                    _frames.append(pd.read_csv(_path))
+                except Exception:
+                    pass
+
     for run_idx in range(1, num_runs + 1):
         _t_run = time.time()
 

@@ -419,11 +419,13 @@ def run_experiment(config: dict) -> str:
 
     print(f"Sweep: {sweep_param} over {len(sweep_list)} values")
 
+    from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import _csv_path
+
     temp_files: list[tuple[str, float]] = []
     for od, sigma, cap in sweep_list:
         raw_val = od if sweep_param == "od_count" else (sigma if sweep_param == "peak_sigma" else round(cap * 100, 2))
         print(f"  {sweep_param} = {raw_val}")
-        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
         tmp_path = tmp.name
         tmp.close()
         run_batch(
@@ -435,7 +437,7 @@ def run_experiment(config: dict) -> str:
         )
         temp_files.append((tmp_path, raw_val))
 
-    # ── Merge all temp Excel files into one ──────────────────────────────────
+    # ── Merge all temp CSV files into one ────────────────────────────────────
     from ExpandedTimeSimulation.simulation_zefat.constants import (
         SHEET_EDGE_METRICS,
         SHEET_EDGE_TIMESLICES,
@@ -455,11 +457,16 @@ def run_experiment(config: dict) -> str:
     for tmp_path, sweep_val in temp_files:
         for sheet in sheet_names:
             try:
-                df = pd.read_excel(tmp_path, sheet_name=sheet)
+                df = pd.read_csv(_csv_path(tmp_path, sheet))
                 df.insert(0, "sweep_param", sweep_param)
                 df.insert(1, "sweep_value", sweep_val)
                 merged[sheet].append(df)
             except Exception:
+                pass
+        for sheet in sheet_names:
+            try:
+                os.remove(_csv_path(tmp_path, sheet))
+            except OSError:
                 pass
         try:
             os.remove(tmp_path)

@@ -338,6 +338,7 @@ def run_experiment(config: dict) -> str:
         vehicle_T=int(config.get("vehicle_T", 100)),
         peak_slot=int(config.get("peak_slot", 10)),
         strategy_keys=strategy_keys or None,
+        path_solver=config.get("path_solver", "astar_reverse_arrival"),
         run_diagnostics_plots=False,
         smooth_tail_u0=float(config.get("smooth_tail_u0", 0.95)),
         time_mode=config.get("time_mode", "entry"),
@@ -422,18 +423,19 @@ def run_experiment(config: dict) -> str:
     from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import _csv_path
 
     temp_files: list[tuple[str, float]] = []
-    for od, sigma, cap in sweep_list:
+    for sweep_idx, (od, sigma, cap) in enumerate(sweep_list):
         raw_val = od if sweep_param == "od_count" else (sigma if sweep_param == "peak_sigma" else round(cap * 100, 2))
         print(f"  {sweep_param} = {raw_val}")
         tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
         tmp_path = tmp.name
         tmp.close()
+        sweep_seed = shared["base_seed"] + sweep_idx * shared["num_runs"]
         run_batch(
             excel_file=tmp_path,
             od_count=int(od),
             peak_sigma=float(sigma),
             capacity_factor=float(cap),
-            **shared,
+            **{**shared, "base_seed": sweep_seed},
         )
         temp_files.append((tmp_path, raw_val))
 

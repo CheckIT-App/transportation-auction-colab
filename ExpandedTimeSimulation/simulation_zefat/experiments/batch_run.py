@@ -407,21 +407,7 @@ def run_batch(
         distribute_od_count=distribute_od_count,
         road_types=RealData.BIG_ROAD_TYPES if big_roads_only else None,
     )
-    # 2) Generate vehicles once (copied per strategy/run)
-    vehicles = loader.generate_vehicles(
-        alpha=(alpha_lo, alpha_hi),
-        reserve_range=(reserve_lo, reserve_hi),
-        entry_fee_range=(entry_fee_lo, entry_fee_hi),
-        lateness_fee_range=(lateness_fee_lo, lateness_fee_hi),
-    )
-    assign_peak_desired_time_by_mode(
-        vehicles,
-        schedule=PeakSchedule(
-            peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
-        ),
-        mode=time_mode,
-        arrival_percentage=arrival_percentage,
-    )
+    # 2) (vehicles generated per run inside the loop, seeded for reproducibility)
 
     # 3) Load or precompute FFLB cache (used by astar_reverse_arrival / astar_fflb)
     _fflb_path = fflb_file or (os.path.splitext(graph_file)[0] + "_fflb.pkl")
@@ -483,9 +469,28 @@ def run_batch(
             print(f"\n=== BATCH RUN {run_idx}/{num_runs} ===")
 
         try:
-            loader.seed = base_seed + run_idx
+            run_seed = base_seed + run_idx
+            loader.seed = run_seed
             loader.generate_od_pairs()
             base_edges = loader.convert_to_base_edges(demand_fraction=demand_fraction)
+
+            # Generate vehicles fresh each run so OD pairs, alpha, reserve all vary
+            random.seed(run_seed)
+            np.random.seed(run_seed)
+            vehicles = loader.generate_vehicles(
+                alpha=(alpha_lo, alpha_hi),
+                reserve_range=(reserve_lo, reserve_hi),
+                entry_fee_range=(entry_fee_lo, entry_fee_hi),
+                lateness_fee_range=(lateness_fee_lo, lateness_fee_hi),
+            )
+            assign_peak_desired_time_by_mode(
+                vehicles,
+                schedule=PeakSchedule(
+                    peak_slot=peak_slot, sigma=peak_sigma, horizon_T=vehicle_T
+                ),
+                mode=time_mode,
+                arrival_percentage=arrival_percentage,
+            )
 
             if capacity_factor != 1.0:
                 base_edges = [

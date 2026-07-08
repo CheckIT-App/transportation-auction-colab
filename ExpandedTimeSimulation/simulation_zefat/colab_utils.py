@@ -306,8 +306,6 @@ def run_experiment(config: dict) -> str:
     Diagnostic plots are suppressed here — use :func:`plot_results` after.
     """
     import numpy as np
-    import tempfile
-
     from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import run_batch
 
     _base_file = config.get("excel_file", "results.xlsx")
@@ -422,14 +420,15 @@ def run_experiment(config: dict) -> str:
 
     from ExpandedTimeSimulation.simulation_zefat.experiments.batch_run import _csv_path
 
+    stem = excel_file[:-4] if excel_file.lower().endswith(".csv") else excel_file
     temp_files: list[tuple[str, float]] = []
     for sweep_idx, (od, sigma, cap) in enumerate(sweep_list):
         raw_val = od if sweep_param == "od_count" else (sigma if sweep_param == "peak_sigma" else round(cap * 100, 2))
         print(f"  {sweep_param} = {raw_val}")
-        tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
-        tmp_path = tmp.name
-        tmp.close()
-        sweep_seed = shared["base_seed"] + sweep_idx * shared["num_runs"]
+        # Use a deterministic path so resume can find it after a crash
+        safe_val = str(raw_val).replace(".", "_")
+        tmp_path = f"{stem}_sweep_{sweep_param}_{safe_val}.csv"
+        sweep_seed = shared["base_seed"] + sweep_idx * 10000
         run_batch(
             excel_file=tmp_path,
             od_count=int(od),

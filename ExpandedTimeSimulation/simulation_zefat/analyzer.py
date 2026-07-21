@@ -210,7 +210,8 @@ def vehicles_to_df(vehicles, run_idx, strat_name):
         )
 
         # Path length (hops) if present
-        path_len = len(v["path"]) if isinstance(v.get("path"), list) else np.nan
+        raw_path = v.get("allocated_path") or v.get("path")
+        path_len = len(raw_path) if isinstance(raw_path, list) else np.nan
 
         rows.append(
             {
@@ -227,6 +228,7 @@ def vehicles_to_df(vehicles, run_idx, strat_name):
                 "entry_delay": entry_delay,
                 "arrival_delay": arrival_delay,
                 "path_len": path_len,
+                "path": raw_path,
                 "real_cost": v.get("real_cost", np.nan),
                 "dijkstra_cost": v.get("dijkstra_cost", np.nan),
                 "source": v.get("source"),

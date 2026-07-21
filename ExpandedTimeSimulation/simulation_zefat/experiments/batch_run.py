@@ -44,6 +44,7 @@ from ExpandedTimeSimulation.simulation_zefat.constants import (
     COL_N,
     # strategy names
     STRAT_ZERO,
+    STRAT_ZERO_UNCAPPED,
     STRAT_TRANSPORT_ADAPTED,
     STRAT_STATIC_MEDIAN,
     STRAT_ONLINE_COMPETITIVE,
@@ -298,6 +299,7 @@ def _build_strategies(
             STRAT_ONLINE_COMPETITIVE,
             STRAT_STATIC_MEDIAN,
             STRAT_ZERO,
+            STRAT_ZERO_UNCAPPED,
             STRAT_SMOOTH_TAIL,
         ]
     from ExpandedTimeSimulation.simulation_zefat.strategies import SmoothTailPricingStrategy
@@ -514,7 +516,7 @@ def run_batch(
                     vmax=vmax,
                     r=r,
                     pricing_strategy=strat,
-                    for_demand=False,
+                    for_demand=strat_name == STRAT_ZERO_UNCAPPED,
                     capacity_is_hourly=capacity_is_hourly,
                     slot_seconds=slot_seconds,
                     node_xy_file=node_xy_file,
@@ -982,7 +984,7 @@ def run_batch_tntp(
                 vmax=vmax,
                 r=r,
                 pricing_strategy=strat,
-                for_demand=False,
+                for_demand=strat_name == STRAT_ZERO_UNCAPPED,
                 capacity_is_hourly=True,
                 slot_seconds=slot_seconds,
                 node_xy_file=node_xy_file,

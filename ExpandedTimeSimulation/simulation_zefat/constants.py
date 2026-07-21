@@ -65,6 +65,7 @@ COL_SERVICE_RATE = "service_rate"
 # strategies
 # ---------------------------------------------------------------------------
 STRAT_ZERO = "Zero"
+STRAT_ZERO_UNCAPPED = "Zero (Uncapped)"
 STRAT_TRANSPORT_ADAPTED = "Transport-Adapted Pricing"
 STRAT_STATIC_MEDIAN = "Static Median"
 STRAT_ONLINE_COMPETITIVE = "Online Competitive"
@@ -72,6 +73,7 @@ STRAT_SMOOTH_TAIL = "Smooth Tail"
 
 ALL_STRATEGIES = [
     STRAT_ZERO,
+    STRAT_ZERO_UNCAPPED,
     STRAT_TRANSPORT_ADAPTED,
     STRAT_STATIC_MEDIAN,
     STRAT_ONLINE_COMPETITIVE,

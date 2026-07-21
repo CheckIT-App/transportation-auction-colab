@@ -5,6 +5,7 @@ from typing import Callable, Dict
 
 from .constants import (
     STRAT_ZERO,
+    STRAT_ZERO_UNCAPPED,
     STRAT_TRANSPORT_ADAPTED,
     STRAT_STATIC_MEDIAN,
     STRAT_ONLINE_COMPETITIVE,
@@ -68,6 +69,11 @@ _STRATEGY_REGISTRY: Dict[str, StrategySpec] = {
         key=STRAT_ZERO,
         factory=_make_zero,
         description="Zero/constant pricing baseline",
+    ),
+    STRAT_ZERO_UNCAPPED: StrategySpec(
+        key=STRAT_ZERO_UNCAPPED,
+        factory=_make_zero,
+        description="Zero pricing with no capacity constraint (for_demand=True)",
     ),
     STRAT_STATIC_MEDIAN: StrategySpec(
         key=STRAT_STATIC_MEDIAN,
